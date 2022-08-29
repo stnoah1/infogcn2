@@ -42,7 +42,6 @@ def get_parser():
     # feeder
     parser.add_argument('--feeder', default='feeders.feeder_ntu.Feeder', help='data loader will be used')
     parser.add_argument('--num_worker', type=int, default=8, help='the number of worker for data loader')
-    parser.add_argument('--balanced_sampling', type=str2bool, default=False, help='the number of worker for data loader')
     parser.add_argument('--random_rot', type=str2bool, default=True, help='')
     parser.add_argument('--repeat', type=int, default=1, help='the number of repeat for data')
 
@@ -55,7 +54,7 @@ def get_parser():
     parser.add_argument('--graph', type=str, default='graph.ntu_rgb_d.Graph', help='')
 
     # optim
-    parser.add_argument('--base_lr', type=float, default=0.1, help='initial learning rate')
+    parser.add_argument('--base_lr', type=float, default=1e-2, help='initial learning rate')
     parser.add_argument('--step', type=int, default=[90, 100], nargs='+', help='the epoch where optimizer reduce the learning rate')
     parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
     parser.add_argument('--nesterov', type=str2bool, default=True, help='use nesterov or not')
@@ -66,12 +65,14 @@ def get_parser():
     parser.add_argument('--weight_decay', type=float, default=0.0005, help='weight decay for optimizer')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--warm_up_epoch', type=int, default=5)
-    parser.add_argument('--lambda_1', type=float, default=1e-4)
-    parser.add_argument('--lambda_2', type=float, default=1e-1)
+    parser.add_argument('--lambda_1', type=float, default=1e-0)
 
     # apex
     parser.add_argument('--half', type=str2bool, default=True, help='Use half-precision (FP16) training')
     parser.add_argument('--amp_opt_level', type=int, default=1, help='NVIDIA Apex AMP optimization level')
+
+    # ODE
+    parser.add_argument('--obs', type=float, default=0.1, help='')
 
     return parser
 

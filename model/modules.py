@@ -4,37 +4,11 @@ import torch
 import numpy as np
 
 from torch import nn, einsum
-from torch.autograd import Variable
+from einops import rearrange
 
 from model.ms_tcn import MultiScale_TemporalConv as MS_TCN
-from einops import rearrange, repeat
+from model.utils import conv_init, bn_init, conv_branch_init
 
-
-def import_class(name):
-    components = name.split('.')
-    mod = __import__(components[0])
-    for comp in components[1:]:
-        mod = getattr(mod, comp)
-    return mod
-
-def bn_init(bn, scale):
-    nn.init.constant_(bn.weight, scale)
-    nn.init.constant_(bn.bias, 0)
-
-def conv_branch_init(conv, branches):
-    weight = conv.weight
-    n = weight.size(0)
-    k1 = weight.size(1)
-    k2 = weight.size(2)
-    nn.init.normal_(weight, 0, math.sqrt(2. / (n * k1 * k2 * branches)))
-    if conv.bias is not None:
-        nn.init.constant_(conv.bias, 0)
-
-def conv_init(conv):
-    if conv.weight is not None:
-        nn.init.kaiming_normal_(conv.weight, mode='fan_out')
-    if conv.bias is not None:
-        nn.init.constant_(conv.bias, 0)
 
 class UnitTCN(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=5, stride=1):

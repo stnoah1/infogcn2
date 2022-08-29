@@ -14,20 +14,20 @@ from collections import OrderedDict
 
 import apex
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 
 from tqdm import tqdm
-from sklearn.metrics import confusion_matrix
 
 from args import get_parser
-from loss import LabelSmoothingCrossEntropy, get_mmd_loss
+from loss import LabelSmoothingCrossEntropy
 from model.infogcn import InfoGCN
-from utils import get_vector_property
-from utils import BalancedSampler as BS
+from utils import AverageMeter
 
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
+
 
 def init_seed(seed):
     torch.cuda.manual_seed_all(seed)
@@ -54,21 +54,22 @@ class Processor():
 
     def __init__(self, arg):
         self.arg = arg
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.save_arg()
-        self.global_step = 0
-        # pdb.set_trace()
         self.load_model()
 
-        if self.arg.phase == 'model_size':
-            pass
-        else:
-            self.load_optimizer()
-            self.load_data()
+        self.load_optimizer()
+        self.load_data()
+
         self.best_acc = 0
         self.best_acc_epoch = 0
+        self.log_recon_loss = AverageMeter()
+        self.log_cls_loss = AverageMeter()
+        self.log_acc = AverageMeter()
 
-        model = self.model.cuda()
 
+
+        model = self.model.to(self.device)
         if self.arg.half:
             self.model, self.optimizer = apex.amp.initialize(
                 model,
@@ -84,30 +85,22 @@ class Processor():
         Feeder = import_class(self.arg.feeder)
         self.data_loader = dict()
         data_path = f'data/{self.arg.dataset}/{self.arg.datacase}_aligned.npz'
-        if self.arg.phase == 'train':
-            dt = Feeder(data_path=data_path,
+        self.data_loader['train'] = torch.utils.data.DataLoader(
+            dataset=Feeder(data_path=data_path,
                 split='train',
                 window_size=64,
                 p_interval=[0.5, 1],
                 vel=self.arg.use_vel,
                 random_rot=self.arg.random_rot,
-                sort=True if self.arg.balanced_sampling else False,
-            )
-            if self.arg.balanced_sampling:
-                sampler = BS(data_source=dt, args=self.arg)
-                shuffle = False
-            else:
-                sampler = None
-                shuffle = True
-            self.data_loader['train'] = torch.utils.data.DataLoader(
-                dataset=dt,
-                sampler=sampler,
-                batch_size=self.arg.batch_size,
-                shuffle=shuffle,
-                num_workers=self.arg.num_worker,
-                drop_last=True,
-                pin_memory=True,
-                worker_init_fn=init_seed)
+                sort=False,
+            ),
+            batch_size=self.arg.batch_size,
+            shuffle=True,
+            num_workers=self.arg.num_worker,
+            drop_last=True,
+            pin_memory=True,
+            worker_init_fn=init_seed)
+
         self.data_loader['test'] = torch.utils.data.DataLoader(
             dataset=Feeder(
                 data_path=data_path,
@@ -130,16 +123,14 @@ class Processor():
             num_person=self.arg.num_person,
             graph=self.arg.graph,
             in_channels=3,
-            drop_out=0,
             num_head=self.arg.n_heads,
             k=self.arg.k,
-            noise_ratio=self.arg.noise_ratio,
-            gain=self.arg.z_prior_gain
+            device=self.device,
         )
-        self.loss = LabelSmoothingCrossEntropy().cuda()
+        self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
+        self.recon_loss = nn.MSELoss().to(self.device)
 
         if self.arg.weights:
-            self.global_step = int(self.arg.weights[:-3].split('-')[-1])
             self.print_log('Load weights from {}.'.format(self.arg.weights))
             if '.pkl' in self.arg.weights:
                 with open(self.arg.weights, 'r') as f:
@@ -147,7 +138,7 @@ class Processor():
             else:
                 weights = torch.load(self.arg.weights)
 
-            weights = OrderedDict([[k.split('module.')[-1], v.cuda()] for k, v in weights.items()])
+            weights = OrderedDict([[k.split('module.')[-1], v.to(self.device)] for k, v in weights.items()])
 
             keys = list(weights.keys())
             for w in self.arg.ignore_weights:
@@ -219,51 +210,29 @@ class Processor():
             with open('{}/log.txt'.format(self.arg.work_dir), 'a') as f:
                 print(str, file=f)
 
-    def record_time(self):
-        self.cur_time = time.time()
-        return self.cur_time
-
-    def split_time(self):
-        split_time = time.time() - self.cur_time
-        self.record_time()
-        return split_time
-
     def train(self, epoch, save_model=False):
         self.model.train()
+        self.log_acc.reset()
+        self.log_cls_loss.reset()
+        self.log_recon_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
         self.adjust_learning_rate(epoch)
 
-        loss_value = []
-        mmd_loss_value = []
-        l2_z_mean_value = []
-        acc_value = []
-        cos_z_value = []
-        dis_z_value = []
-        cos_z_prior_value = []
-        dis_z_prior_value = []
+        tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
-        self.record_time()
-        timer = dict(dataloader=0.001, model=0.001, statistics=0.001)
-
-        for data, y, index in tqdm(self.data_loader['train'], dynamic_ncols=True):
-            self.global_step += 1
-            with torch.no_grad():
-                data = data.float().cuda()
-                y = y.long().cuda()
-            timer['dataloader'] += self.split_time()
+        for x, y, index in tbar:
+            B, _, T, _, _ = x.shape
+            x = x.float().to(self.device)
+            y = y.long().to(self.device)
+            t = torch.linspace(0, T - 1, T).to(self.device)
 
             # forward
-            y_hat, z = self.model(data)
-            mmd_loss, l2_z_mean, z_mean = get_mmd_loss(z, self.model.z_prior, y, self.arg.num_class)
-            cos_z, dis_z = get_vector_property(z_mean)
-            cos_z_prior, dis_z_prior = get_vector_property(self.model.z_prior)
-            cos_z_value.append(cos_z.data.item())
-            dis_z_value.append(dis_z.data.item())
-            cos_z_prior_value.append(cos_z_prior.data.item())
-            dis_z_prior_value.append(dis_z_prior.data.item())
+            y_hat, x_hat = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
 
-            cls_loss = self.loss(y_hat, y)
-            loss = self.arg.lambda_2* mmd_loss + self.arg.lambda_1* l2_z_mean + cls_loss
+            cls_loss = self.cls_loss(y_hat, y)
+            recon_loss = self.recon_loss(x_hat, x)
+            loss = cls_loss + self.arg.lambda_1 * recon_loss
+
             # backward
             self.optimizer.zero_grad()
             if self.arg.half:
@@ -274,80 +243,74 @@ class Processor():
 
             self.optimizer.step()
 
-            loss_value.append(cls_loss.data.item())
-            mmd_loss_value.append(mmd_loss.data.item())
-            l2_z_mean_value.append(l2_z_mean.data.item())
-            timer['model'] += self.split_time()
-
             value, predict_label = torch.max(y_hat.data, 1)
-            acc = torch.mean((predict_label == y.data).float())
-            acc_value.append(acc.data.item())
 
-            timer['statistics'] += self.split_time()
+            self.log_acc.update((predict_label == y.data).float().mean(), B)
+            self.log_cls_loss.update(cls_loss.data.item(), B)
+            self.log_recon_loss.update(recon_loss.data.item(), B)
+
+            tbar.set_description(
+                f"[Epoch #{epoch}]"\
+                f"ACC:{self.log_acc.avg:.3f}, " \
+                f"CLS_loss:{self.log_cls_loss.avg:.3f}, " \
+                f"RECON_loss:{self.log_recon_loss.avg:.3f}, " \
+            )
 
         # statistics of time consumption and loss
-        proportion = {
-            k: '{:02d}%'.format(int(round(v * 100 / sum(timer.values()))))
-            for k, v in timer.items()
-        }
-        self.print_log(f'\tTraining loss: {np.mean(loss_value):.4f}.  Training acc: {np.mean(acc_value)*100:.2f}%.')
-        self.print_log(f'\tTime consumption: [Data]{proportion["dataloader"]}, [Network]{proportion["model"]}')
-
         if save_model:
             state_dict = self.model.state_dict()
             weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
 
-            torch.save(weights, f'{self.arg.work_dir}/runs-{epoch+1}-{int(self.global_step)}.pt')
+            torch.save(weights, f'{self.arg.work_dir}/runs-{epoch+1}.pt')
 
-    def eval(self, epoch, save_score=False, loader_name=['test'], save_z=False):
+    def eval(self, epoch, save_score=False, loader_name=['test']):
         self.model.eval()
+        self.log_acc.reset()
+        self.log_cls_loss.reset()
+        self.log_recon_loss.reset()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
         for ln in loader_name:
             loss_value = []
             cls_loss_value = []
-            mmd_loss_value = []
-            l2_z_mean_value = []
             score_frag = []
             label_list = []
             pred_list = []
-            cos_z_value = []
-            dis_z_value = []
-            cos_z_prior_value = []
-            dis_z_prior_value = []
             step = 0
-            z_list = []
-            for data, y, index in tqdm(self.data_loader[ln], dynamic_ncols=True):
+            tbar = tqdm(self.data_loader[ln], dynamic_ncols=True)
+            for x, y, index in tbar:
                 label_list.append(y)
                 with torch.no_grad():
-                    data = data.float().cuda()
-                    y = y.long().cuda()
-                    y_hat, z = self.model(data)
-                    if save_z:
-                        z_list.append(z.data.cpu().numpy())
-                    mmd_loss, l2_z_mean, z_mean = get_mmd_loss(z, self.model.z_prior, y, self.arg.num_class)
-                    cos_z, dis_z = get_vector_property(z_mean)
-                    cos_z_prior, dis_z_prior = get_vector_property(self.model.z_prior)
-                    cos_z_value.append(cos_z.data.item())
-                    dis_z_value.append(dis_z.data.item())
-                    cos_z_prior_value.append(cos_z_prior.data.item())
-                    dis_z_prior_value.append(dis_z_prior.data.item())
-                    cls_loss = self.loss(y_hat, y)
-                    loss = self.arg.lambda_2*mmd_loss + self.arg.lambda_1*l2_z_mean + cls_loss
+                    B, _, T, _, _ = x.shapewq
+                    x = x.float().to(self.device)
+                    y = y.long().to(self.device)
+                    t = torch.linspace(0, T - 1, T).to(self.device)
+
+                    y_hat, x_hat = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
+                    cls_loss = self.cls_loss(y_hat, y)
+                    recon_loss = self.recon_loss(x_hat, x)
+                    loss = cls_loss + self.arg.lambda_1 * recon_loss
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
                     cls_loss_value.append(cls_loss.data.item())
-                    mmd_loss_value.append(mmd_loss.data.item())
-                    l2_z_mean_value.append(l2_z_mean.data.item())
 
                     _, predict_label = torch.max(y_hat.data, 1)
                     pred_list.append(predict_label.data.cpu().numpy())
                     step += 1
 
+                self.log_acc.update((predict_label == y.data).float().mean(), B)
+                self.log_cls_loss.update(cls_loss.data.item(), B)
+                self.log_recon_loss.update(recon_loss.data.item(), B)
+
+                tbar.set_description(
+                    f"[Epoch #{epoch}]"\
+                    f"ACC:{self.log_acc.avg:.3f}, " \
+                    f"CLS_loss:{self.log_cls_loss.avg:.3f}, " \
+                    f"RECON_loss:{self.log_recon_loss.avg:.3f}, " \
+                )
+
+
             score = np.concatenate(score_frag)
-            loss = np.mean(loss_value)
-            cls_loss = np.mean(cls_loss_value)
-            mmd_loss = np.mean(mmd_loss_value)
-            l2_z_mean_loss = np.mean(l2_z_mean_value)
+
             if 'ucla' in self.arg.feeder:
                 self.data_loader[ln].dataset.sample_name = np.arange(len(score))
 
@@ -376,17 +339,13 @@ class Processor():
             label_list = np.concatenate(label_list)
             pred_list = np.concatenate(pred_list)
 
-            if save_z:
-                z_list = np.concatenate(z_list)
-                np.savez(f'{self.arg.work_dir}/z_values.npz', z=z_list, z_prior=self.model.z_prior.cpu().numpy(), y=label_list)
 
     def start(self):
         if self.arg.phase == 'train':
             self.print_log('Parameters:\n{}\n'.format(str(vars(self.arg))))
-            self.global_step = 0
             def count_parameters(model):
                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
-            self.print_log(f'# Parameters: {count_parameters(self.model)}')
+            self.print_log(f'# Parameters: {count_parameters(self.model)/10**6:.3f}M')
             for epoch in range(self.arg.start_epoch, self.arg.num_epoch):
                 save_model = (epoch + 1 == self.arg.num_epoch) and (epoch + 1 > self.arg.save_epoch)
 
@@ -422,7 +381,7 @@ class Processor():
             self.arg.print_log = False
             self.print_log('Model:   {}.'.format(self.arg.model))
             self.print_log('Weights: {}.'.format(self.arg.weights))
-            self.eval(epoch=0, save_score=self.arg.save_score, loader_name=['test'], save_z=True)
+            self.eval(epoch=0, save_score=self.arg.save_score, loader_name=['test'])
             self.print_log('Done.\n')
 
 def main():

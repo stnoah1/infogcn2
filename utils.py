@@ -201,53 +201,26 @@ def get_attn(x, mask= None, similarity='scaled_dot'):
     embd = torch.bmm(attn, x)
     return embd, attn
 
-def get_vector_property(x):
-    N, C = x.size()
-    x1 = x.unsqueeze(0).expand(N, N, C)
-    x2 = x.unsqueeze(1).expand(N, N, C)
-    x1 = x1.reshape(N*N, C)
-    x2 = x2.reshape(N*N, C)
-    cos_sim = F.cosine_similarity(x1, x2, dim=1, eps=1e-6).view(N, N)
-    cos_sim = torch.triu(cos_sim, diagonal=1).sum() * 2 / (N*(N-1))
-    pdist = (LA.norm(x1-x2, ord=2, dim=1)).view(N, N)
-    pdist = torch.triu(pdist, diagonal=1).sum() * 2 / (N*(N-1))
-    return cos_sim, pdist
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
 
-class BalancedSampler(Sampler[int]):
 
-    data_source: Sized
-    replacement: bool
-
-    def __init__(self, data_source: Sized, args=None) -> None:
-        self.dt = data_source
-        self.args = args
-        self.n_cls = args.num_class
-        self.n_dt = len(self.dt)
-        self.n_per_cls = self.dt.n_per_cls
-        self.n_cls_wise_desired = int(self.n_dt/self.n_cls)
-        self.n_repeat = np.ceil(self.n_cls_wise_desired/np.array(self.n_per_cls)).astype(int)
-        self.n_samples = self.n_cls_wise_desired * self.n_cls
-        self.st_idx_cls = self.dt.csum_n_per_cls[:-1]
-        self.cls_idx = torch.from_numpy(self.st_idx_cls).\
-           unsqueeze(1).expand(self.n_cls, self.n_cls_wise_desired)
-
-    def num_samples(self) -> int:
-        return self.n_samples
-
-    def __iter__(self):
-        batch_rand_perm_lst = list()
-        for i_cls in range(self.n_cls):
-            rand = torch.rand(self.n_repeat[i_cls], self.n_per_cls[i_cls])
-            brp = rand.argsort(dim=-1).reshape(-1)[:self.n_cls_wise_desired]
-            batch_rand_perm_lst.append(brp)
-        batch_rand_perm  = torch.stack(batch_rand_perm_lst, 0)
-        batch_rand_perm += self.cls_idx
-        b = batch_rand_perm.permute(1, 0).reshape(-1).tolist()
-        yield from b
-
-    def __len__(self):
-        return self.num_samples
 
 if __name__ == "__main__":
     create_aligned_dataset()
