@@ -37,8 +37,9 @@ class DiffeqSolver(nn.Module):
         pred_y = odeint(self.ode_func, first_point, time_steps_to_predict,
                         rtol=self.odeint_rtol, atol=self.odeint_atol,
                         method=self.ode_method)
-        pred_y = rearrange(pred_y, 't b c e v -> b t c v e').squeeze()
+        pred_y = rearrange(pred_y, 't b c e v -> b c t v e').squeeze()
 
+        # b c t v
         return pred_y
 
 
@@ -156,7 +157,9 @@ class InfoGCN(nn.Module):
         x += self.pos_embedding[:, :self.num_point]
 
         # encoding
-        x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, t=T)
+        x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
+        x = self.data_bn(x)
+        x = rearrange(x, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         x = self.encoder(x)
         fp_mu, fp_std = self.encoder_z0(x)
 
@@ -167,9 +170,6 @@ class InfoGCN(nn.Module):
         z = self.diffeq_solver(fp_enc, t)
 
         # cls_decoding
-        z = rearrange(z, '(n m) t c v -> n (m v c) t', m=M)
-        z = self.data_bn(z)
-        z = rearrange(z, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         y = self.cls_decoder(z)
         y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
         y = self.classifier(y)
