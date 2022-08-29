@@ -73,7 +73,7 @@ def get_parser():
     parser.add_argument('--amp_opt_level', type=int, default=1, help='NVIDIA Apex AMP optimization level')
 
     # ODE
-    parser.add_argument('--obs', type=float, default=1, help='')
+    parser.add_argument('--obs', type=float, default=0.1, help='')
 
     return parser
 

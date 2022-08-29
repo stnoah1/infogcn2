@@ -216,7 +216,7 @@ class Processor():
             B, _, T, _, _ = x.shape
             x = x.float().to(self.device)
             y = y.long().to(self.device)
-            t = torch.linspace(0, T - 1, T).to(self.device)
+            t = torch.linspace(0, T - int(self.arg.obs*T) - 1, T - int(self.arg.obs*T)).to(self.device)
 
             # forward
             y_hat, x_hat, kl_div = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
@@ -278,7 +278,7 @@ class Processor():
                     B, _, T, _, _ = x.shape
                     x = x.float().to(self.device)
                     y = y.long().to(self.device)
-                    t = torch.linspace(0, T - 1, T).to(self.device)
+                    t = torch.linspace(0, T - int(self.arg.obs*T) - 1, T - int(self.arg.obs*T)).to(self.device)
 
                     y_hat, x_hat, kl_div = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
                     cls_loss = self.cls_loss(y_hat, y)

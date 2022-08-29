@@ -6,7 +6,7 @@ from torch import nn
 
 from einops import rearrange
 
-from model.modules import EncodingBlock, SA_GC, UnitGCN
+from model.modules import EncodingBlock, SA_GC
 from model.utils import bn_init, sample_standard_gaussian, import_class
 from model.encoder_decoder import Encoder_z0_RNN
 
@@ -171,6 +171,7 @@ class InfoGCN(nn.Module):
         z = self.diffeq_solver(fp_enc, t)
 
         # cls_decoding
+        y = torch.cat((x, z[:, :, 1:, :]), dim=2)
         y = self.cls_decoder(z)
         y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
         y = self.classifier(y)
