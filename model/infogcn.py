@@ -71,8 +71,8 @@ class InfoGCN(nn.Module):
         self.A_vector = self.get_A(graph, k)
         self.to_joint_embedding = nn.Linear(in_channels, base_channel)
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
-        # self.data_bn = nn.BatchNorm1d(num_person * base_channel * num_point)
-        # bn_init(self.data_bn, 1)
+        self.data_bn = nn.BatchNorm1d(num_person * base_channel * num_point)
+        bn_init(self.data_bn, 1)
         ode_func = ODEFunc(base_channel, 4)
 
         self.diffeq_solver = DiffeqSolver(ode_func, ode_solver_method,
@@ -143,7 +143,9 @@ class InfoGCN(nn.Module):
         x += self.pos_embedding[:, :self.num_point]
 
         # encoding
-        x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, t=T)
+        x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, t=T)
+        x = self.data_bn(x)
+        x = rearrange(x, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         x = self.encoder(x)
         fp_mu, fp_std = self.encoder_z0(x)
 
