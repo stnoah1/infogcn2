@@ -6,7 +6,7 @@ from torch import nn
 
 from einops import rearrange
 
-from model.modules import EncodingBlock, SA_GC
+from model.modules import EncodingBlock, SA_GC, UnitGCN
 from model.utils import bn_init, sample_standard_gaussian, import_class
 from model.encoder_decoder import Encoder_z0_RNN
 
@@ -43,18 +43,35 @@ class DiffeqSolver(nn.Module):
 
 
 class ODEFunc(nn.Module):
-    def __init__(self, dim, num_layer):
+    def __init__(self, dim, A):
         super(ODEFunc, self).__init__()
-        layers = []
-        for i in range(num_layer):
-            layers.append(nn.Conv2d(dim, dim, 1))
-        self.layers = nn.Sequential(*layers)
+        self.layers = []
+        self.A = A
+        self.relu = nn.ReLU(inplace=True)
+        self.conv1 = nn.Conv2d(dim, dim, 1)
+        self.conv2 = nn.Conv2d(dim, dim, 1)
+        self.conv3 = nn.Conv2d(dim, dim, 1)
+        self.conv4 = nn.Conv2d(dim, dim, 1)
 
     def forward(self, t, x, bacwards=False):
-        grad = self.layers(x)
+        # TODO:refactroing
+        res = x
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = self.conv1(x)
+        res = self.relu(x + res)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = self.conv2(x)
+        res = self.relu(x + res)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = self.conv3(x)
+        res = self.relu(x + res)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = self.conv4(x)
+        x = self.relu(x + res)
+
         if bacwards:
-            grad = -grad
-        return grad
+            x = -x
+        return x
 
 
 class InfoGCN(nn.Module):
@@ -62,18 +79,19 @@ class InfoGCN(nn.Module):
                  graph=None, in_channels=3, num_head=3, k=0, device='cuda'):
         super(InfoGCN, self).__init__()
 
-        A = np.stack([np.eye(num_point)] * num_head, axis=0)
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
+        self.Graph = import_class(graph)()
+        A = np.stack([self.Graph.A_norm] * num_head, axis=0)
 
         base_channel = 64
         self.num_class = num_class
         self.num_point = num_point
-        self.A_vector = self.get_A(graph, k)
+        self.A_vector = self.get_A(k)
         self.to_joint_embedding = nn.Linear(in_channels, base_channel)
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
         self.data_bn = nn.BatchNorm1d(num_person * base_channel * num_point)
         bn_init(self.data_bn, 1)
-        ode_func = ODEFunc(base_channel, 4)
+        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm)).to(device)
 
         self.diffeq_solver = DiffeqSolver(ode_func, ode_solver_method,
             odeint_rtol=1e-5, odeint_atol=1e-4, device=device)
@@ -125,10 +143,9 @@ class InfoGCN(nn.Module):
         # loss = -torch.logsumexp(-kl_coef * kldiv_z0,0)
         return loss
 
-    def get_A(self, graph, k):
-        Graph = import_class(graph)()
-        A_outward = Graph.A_outward_binary
-        I = np.eye(Graph.num_node)
+    def get_A(self, k):
+        A_outward = self.Graph.A_outward_binary
+        I = np.eye(self.Graph.num_node)
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
     def forward(self, x, t):
