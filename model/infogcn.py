@@ -51,7 +51,7 @@ class ODEFunc(nn.Module):
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
         self.conv3 = nn.Conv2d(dim, dim, 1)
-        self.conv4 = nn.Conv2d(dim, dim, 1)
+        # self.conv4 = nn.Conv2d(dim, dim, 1)
 
     def forward(self, t, x, bacwards=False):
         # TODO:refactroing
@@ -63,9 +63,6 @@ class ODEFunc(nn.Module):
         x = self.relu(x)
         x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv3(x)
-        x = self.relu(x)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
-        x = self.conv4(x)
         x = self.relu(x)
 
         if bacwards:
@@ -159,9 +156,7 @@ class InfoGCN(nn.Module):
         x += self.pos_embedding[:, :self.num_point]
 
         # encoding
-        x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, t=T)
-        x = self.data_bn(x)
-        x = rearrange(x, 'n (m v c) t -> (n m) c t v', m=M, v=V)
+        x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, t=T)
         x = self.encoder(x)
         fp_mu, fp_std = self.encoder_z0(x)
 
@@ -172,6 +167,9 @@ class InfoGCN(nn.Module):
         z = self.diffeq_solver(fp_enc, t)
 
         # cls_decoding
+        z = rearrange(z, '(n m) t c v -> n (m v c) t', m=M)
+        z = self.data_bn(z)
+        z = rearrange(z, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         y = self.cls_decoder(z)
         y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
         y = self.classifier(y)
