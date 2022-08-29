@@ -101,7 +101,7 @@ class Encoder_z0_RNN(nn.Module):
         )
 
 
-    def forward(self, data, run_backwards=True):
+    def forward(self, data, run_backwards=False):
         # data : B C T V
 
         B, C, T, V = data.shape
@@ -118,7 +118,7 @@ class Encoder_z0_RNN(nn.Module):
 
         z0 = self.hiddens_to_z0(output[-1])
         mean, std = torch.split(z0, C, dim=1)
-        std = std.abs()
+        std = std.abs() + 1e-6
         assert(not torch.isnan(mean).any())
         assert(not torch.isnan(std).any())
 

@@ -56,6 +56,7 @@ class Processor():
         self.log_recon_loss = AverageMeter()
         self.log_cls_loss = AverageMeter()
         self.log_acc = AverageMeter()
+        self.log_kl_div = AverageMeter()
 
 
 
@@ -204,6 +205,7 @@ class Processor():
         self.model.train()
         self.log_acc.reset()
         self.log_cls_loss.reset()
+        self.log_kl_div.reset()
         self.log_recon_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
         self.adjust_learning_rate(epoch)
@@ -217,11 +219,11 @@ class Processor():
             t = torch.linspace(0, T - 1, T).to(self.device)
 
             # forward
-            y_hat, x_hat = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
+            y_hat, x_hat, kl_div = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
 
             cls_loss = self.cls_loss(y_hat, y)
             recon_loss = self.recon_loss(x_hat, x)
-            loss = cls_loss + self.arg.lambda_1 * recon_loss
+            loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
 
             # backward
             self.optimizer.zero_grad()
@@ -237,12 +239,14 @@ class Processor():
 
             self.log_acc.update((predict_label == y.data).float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
+            self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
 
             tbar.set_description(
                 f"[Epoch #{epoch}]"\
                 f"ACC:{self.log_acc.avg:.3f}, " \
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
+                f"KL:{self.log_kl_div.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.3f}, " \
             )
 
@@ -257,6 +261,7 @@ class Processor():
         self.model.eval()
         self.log_acc.reset()
         self.log_cls_loss.reset()
+        self.log_kl_div.reset()
         self.log_recon_loss.reset()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
         for ln in loader_name:
@@ -275,10 +280,10 @@ class Processor():
                     y = y.long().to(self.device)
                     t = torch.linspace(0, T - 1, T).to(self.device)
 
-                    y_hat, x_hat = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
+                    y_hat, x_hat, kl_div = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
                     cls_loss = self.cls_loss(y_hat, y)
                     recon_loss = self.recon_loss(x_hat, x)
-                    loss = cls_loss + self.arg.lambda_1 * recon_loss
+                    loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
                     cls_loss_value.append(cls_loss.data.item())
@@ -290,11 +295,13 @@ class Processor():
                 self.log_acc.update((predict_label == y.data).float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
+                self.log_kl_div.update(kl_div.data.item(), B)
 
                 tbar.set_description(
-                    f"[Epoch #{epoch}]"\
+                    f"[Epoch #{epoch}] "\
                     f"ACC:{self.log_acc.avg:.3f}, " \
                     f"CLS:{self.log_cls_loss.avg:.3f}, " \
+                    f"KL:{self.log_kl_div.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.3f}, " \
                 )
 

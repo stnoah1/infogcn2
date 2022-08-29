@@ -136,7 +136,7 @@ class InfoGCN(nn.Module):
             print(fp_std)
             raise Exception("kldiv_z0 is Nan!")
 
-        loss = kldiv_z0.mean((3,4)).sum(0).mean(0).mean(0) # hw -> mean , t -> sum, b,c -> mean
+        loss = kldiv_z0.mean()
         # loss = -torch.logsumexp(-kl_coef * kldiv_z0,0)
         return loss
 
@@ -162,11 +162,12 @@ class InfoGCN(nn.Module):
         x = rearrange(x, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         x = self.encoder(x)
         fp_mu, fp_std = self.encoder_z0(x)
+        kl_div = self.KL_div(fp_mu, fp_std)
 
         # extrapoloation
         # TODO: kl_div
-        # fp_enc = sample_standard_gaussian(fp_mu, fp_std)
-        fp_enc = fp_mu
+        fp_enc = sample_standard_gaussian(fp_mu, fp_std)
+        # fp_enc = fp_mu
         z = self.diffeq_solver(fp_enc, t)
 
         # cls_decoding
@@ -178,4 +179,4 @@ class InfoGCN(nn.Module):
         x_hat = self.recon_decoder(z)
         x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=M)
 
-        return y, x_hat
+        return y, x_hat, kl_div
