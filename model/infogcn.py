@@ -55,19 +55,18 @@ class ODEFunc(nn.Module):
 
     def forward(self, t, x, bacwards=False):
         # TODO:refactroing
-        res = x
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
-        res = self.relu(x + res)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = self.relu(x)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv2(x)
-        res = self.relu(x + res)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = self.relu(x)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv3(x)
-        res = self.relu(x + res)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), res)
+        x = self.relu(x)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv4(x)
-        x = self.relu(x + res)
+        x = self.relu(x)
 
         if bacwards:
             x = -x
