@@ -96,7 +96,7 @@ class Encoder_z0_RNN(nn.Module):
         )
 
         self.sagc_lstm =  SAGC_LSTM(
-            input_dim=self.latent_dim, hidden_dims=[256, 256, self.latent_dim],
+            input_dim=self.latent_dim, hidden_dims=[128, 128, self.latent_dim],
             n_layers=3, A=A, device=device
         )
 

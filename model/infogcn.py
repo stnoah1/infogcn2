@@ -58,7 +58,7 @@ class ODEFunc(nn.Module):
 
 
 class InfoGCN(nn.Module):
-    def __init__(self, num_class=60, num_point=25, num_person=2, obs_p=0.1, ode_solver_method=None,
+    def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method=None,
                  graph=None, in_channels=3, num_head=3, k=0, device='cuda'):
         super(InfoGCN, self).__init__()
 
