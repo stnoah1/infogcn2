@@ -1,23 +1,29 @@
 import argparse
 import random
-import pickle
 
+import sys
+import traceback
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from torch.utils.data.sampler import Sampler
-from typing import Sized
 from tqdm import tqdm
-from torch import linalg as LA
 
-def import_class(name):
-    components = name.split('.')
-    mod = __import__(components[0])
-    for comp in components[1:]:
-        mod = getattr(mod, comp)
-    return mod
+# def import_class(name):
+    # components = name.split('.')
+    # mod = __import__(components[0])
+    # for comp in components[1:]:
+        # mod = getattr(mod, comp)
+    # return mod
+
+def import_class(import_str):
+    mod_str, _sep, class_str = import_str.rpartition('.')
+    __import__(mod_str)
+    try:
+        return getattr(sys.modules[mod_str], class_str)
+    except AttributeError:
+        raise ImportError('Class %s cannot be found (%s)' % (class_str, traceback.format_exception(*sys.exc_info())))
+
 
 
 def count_params(model):

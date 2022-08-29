@@ -2,12 +2,10 @@
 from __future__ import print_function
 
 import os
-import sys
 import time
 import glob
 import pickle
 import random
-import traceback
 import resource
 
 from collections import OrderedDict
@@ -23,7 +21,7 @@ from tqdm import tqdm
 from args import get_parser
 from loss import LabelSmoothingCrossEntropy
 from model.infogcn import InfoGCN
-from utils import AverageMeter
+from utils import AverageMeter, import_class
 
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
@@ -37,14 +35,6 @@ def init_seed(seed):
     # torch.backends.cudnn.enabled = False
     torch.backends.cudnn.deterministic = False
     torch.backends.cudnn.benchmark = True
-
-def import_class(import_str):
-    mod_str, _sep, class_str = import_str.rpartition('.')
-    __import__(mod_str)
-    try:
-        return getattr(sys.modules[mod_str], class_str)
-    except AttributeError:
-        raise ImportError('Class %s cannot be found (%s)' % (class_str, traceback.format_exception(*sys.exc_info())))
 
 
 class Processor():
@@ -252,8 +242,8 @@ class Processor():
             tbar.set_description(
                 f"[Epoch #{epoch}]"\
                 f"ACC:{self.log_acc.avg:.3f}, " \
-                f"CLS_loss:{self.log_cls_loss.avg:.3f}, " \
-                f"RECON_loss:{self.log_recon_loss.avg:.3f}, " \
+                f"CLS:{self.log_cls_loss.avg:.3f}, " \
+                f"RECON:{self.log_recon_loss.avg:.3f}, " \
             )
 
         # statistics of time consumption and loss
@@ -280,7 +270,7 @@ class Processor():
             for x, y, index in tbar:
                 label_list.append(y)
                 with torch.no_grad():
-                    B, _, T, _, _ = x.shapewq
+                    B, _, T, _, _ = x.shape
                     x = x.float().to(self.device)
                     y = y.long().to(self.device)
                     t = torch.linspace(0, T - 1, T).to(self.device)
@@ -304,8 +294,8 @@ class Processor():
                 tbar.set_description(
                     f"[Epoch #{epoch}]"\
                     f"ACC:{self.log_acc.avg:.3f}, " \
-                    f"CLS_loss:{self.log_cls_loss.avg:.3f}, " \
-                    f"RECON_loss:{self.log_recon_loss.avg:.3f}, " \
+                    f"CLS:{self.log_cls_loss.avg:.3f}, " \
+                    f"RECON:{self.log_recon_loss.avg:.3f}, " \
                 )
 
 
