@@ -216,13 +216,13 @@ class Processor():
             B, _, T, _, _ = x.shape
             x = x.float().to(self.device)
             y = y.long().to(self.device)
-            t = torch.linspace(0, T - int(self.arg.obs*T) - 1, T - int(self.arg.obs*T)).to(self.device)
+            t_obs = int(self.arg.obs*T)
+            t_pred =  T - t_obs
+            t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
 
-            # forward
-            y_hat, x_hat, kl_div = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
-
+            y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
             cls_loss = self.cls_loss(y_hat, y)
-            recon_loss = self.recon_loss(x_hat, x)
+            recon_loss = self.recon_loss(x_hat, x[:, :, t_obs:, ...])
             loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
 
             # backward
@@ -278,11 +278,13 @@ class Processor():
                     B, _, T, _, _ = x.shape
                     x = x.float().to(self.device)
                     y = y.long().to(self.device)
-                    t = torch.linspace(0, T - int(self.arg.obs*T) - 1, T - int(self.arg.obs*T)).to(self.device)
+                    t_obs = int(self.arg.obs*T)
+                    t_pred =  T - t_obs
+                    t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
 
-                    y_hat, x_hat, kl_div = self.model(x[:, :, :int(self.arg.obs*T), ...], t)
+                    y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
                     cls_loss = self.cls_loss(y_hat, y)
-                    recon_loss = self.recon_loss(x_hat, x)
+                    recon_loss = self.recon_loss(x_hat, x[:, :, t_obs:, ...])
                     loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
