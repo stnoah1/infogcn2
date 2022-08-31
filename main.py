@@ -79,7 +79,7 @@ class Processor():
         self.data_loader['train'] = torch.utils.data.DataLoader(
             dataset=Feeder(data_path=data_path,
                 split='train',
-                window_size=64,
+                window_size=self.arg.window_size,
                 p_interval=[0.5, 1],
                 vel=self.arg.use_vel,
                 random_rot=self.arg.random_rot,
@@ -96,7 +96,7 @@ class Processor():
             dataset=Feeder(
                 data_path=data_path,
                 split='test',
-                window_size=64,
+                window_size=self.arg.window_size,
                 p_interval=[0.95],
                 vel=self.arg.use_vel
             ),
@@ -116,10 +116,11 @@ class Processor():
             in_channels=3,
             num_head=self.arg.n_heads,
             k=self.arg.k,
+            base_channel=self.arg.base_channel,
             device=self.device,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
-        self.recon_loss = nn.MSELoss().to(self.device)
+        self.recon_loss = nn.MSELoss(reduce=None).to(self.device)
 
         if self.arg.weights:
             self.print_log('Load weights from {}.'.format(self.arg.weights))
@@ -217,13 +218,15 @@ class Processor():
             x = x.float().to(self.device)
             y = y.long().to(self.device)
             t_obs = int(self.arg.obs*T)
-            t_pred =  T - t_obs
-            t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
+            # t_pred =  T - t_obs
+            # t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
+            t = torch.linspace(0, T - 1, T).to(self.device)
 
             y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
             cls_loss = self.cls_loss(y_hat, y)
-            recon_loss = self.recon_loss(x_hat, x[:, :, t_obs:, ...])
-            loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
+            # x_gt = x[:, :, t_obs:, ...]
+            recon_loss = (self.recon_loss(x_hat, x) * (x != 0)).mean()
+            loss = 0 * cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
 
             # backward
             self.optimizer.zero_grad()
@@ -233,6 +236,7 @@ class Processor():
             else:
                 loss.backward()
 
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
             value, predict_label = torch.max(y_hat.data, 1)
@@ -250,6 +254,8 @@ class Processor():
                 f"RECON:{self.log_recon_loss.avg:.3f}, " \
             )
 
+        # with open(f"results/x_hat_list_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}.pkl", 'wb') as fp:
+            # pickle.dump({"x_hat":x_hat, "x":x}, fp)
         # statistics of time consumption and loss
         if save_model:
             state_dict = self.model.state_dict()
@@ -279,12 +285,13 @@ class Processor():
                     x = x.float().to(self.device)
                     y = y.long().to(self.device)
                     t_obs = int(self.arg.obs*T)
-                    t_pred =  T - t_obs
-                    t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
+                    # t_pred =  T - t_obs
+                    # t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
+                    t = torch.linspace(0, T - 1, T).to(self.device)
 
                     y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
                     cls_loss = self.cls_loss(y_hat, y)
-                    recon_loss = self.recon_loss(x_hat, x[:, :, t_obs:, ...])
+                    recon_loss = (self.recon_loss(x_hat, x) * (x != 0)).mean()
                     loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
@@ -306,7 +313,6 @@ class Processor():
                     f"KL:{self.log_kl_div.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.3f}, " \
                 )
-
 
             score = np.concatenate(score_frag)
 

@@ -73,14 +73,13 @@ class ODEFunc(nn.Module):
 
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method=None,
-                 graph=None, in_channels=3, num_head=3, k=0, device='cuda'):
+                 graph=None, in_channels=3, num_head=3, k=0, base_channel=64, device='cuda'):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
         self.Graph = import_class(graph)()
         A = np.stack([self.Graph.A_norm] * num_head, axis=0)
 
-        base_channel = 64
         self.num_class = num_class
         self.num_point = num_point
         self.A_vector = self.get_A(k)
@@ -102,7 +101,7 @@ class InfoGCN(nn.Module):
         self.recon_decoder = nn.Sequential(
             SA_GC(base_channel, base_channel, A),
             SA_GC(base_channel, base_channel, A),
-            SA_GC(base_channel, 3, A),
+            nn.Conv2d(base_channel, 3, 1),
         )
 
         self.cls_decoder =  nn.Sequential(
@@ -157,21 +156,22 @@ class InfoGCN(nn.Module):
         x += self.pos_embedding[:, :self.num_point]
 
         # encoding
-        x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
-        x = self.data_bn(x)
-        x = rearrange(x, 'n (m v c) t -> (n m) c t v', m=M, v=V)
+        x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N, v=V)
         x = self.encoder(x)
-        fp_mu, fp_std = self.encoder_z0(x)
+        fp_mu, fp_std = self.encoder_z0(x, run_backwards=True)
         kl_div = self.KL_div(fp_mu, fp_std)
 
         # extrapoloation
         # TODO: kl_div
-        fp_enc = sample_standard_gaussian(fp_mu, fp_std)
-        # fp_enc = fp_mu
+        # fp_enc = sample_standard_gaussian(fp_mu, fp_std)
+        fp_enc = fp_mu
         z = self.diffeq_solver(fp_enc, t)
 
         # cls_decoding
-        y = torch.cat((x, z[:, :, 1:, :]), dim=2)
+        # TODO: match the dimmension
+        # x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
+        # x = self.data_bn(x)
+        # x = rearrange(x, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         y = self.cls_decoder(z)
         y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
         y = self.classifier(y)
