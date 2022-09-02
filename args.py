@@ -51,9 +51,10 @@ def get_parser():
     parser.add_argument('--weights', default=None, help='the weights for network initialization')
     parser.add_argument('--ignore_weights', type=str, default=[], nargs='+', help='the name of weights which will be ignored in the initialization')
     parser.add_argument('--n_heads', type=int, default=3, help='')
-    parser.add_argument('--k', type=int, default=0, help='')
+    parser.add_argument('--k', type=int, default=8, help='')
     parser.add_argument('--z_prior_gain', type=int, default=3, help='')
     parser.add_argument('--graph', type=str, default='graph.ntu_rgb_d.Graph', help='')
+    parser.add_argument('--dct', type=str2bool, default=False, help='')
 
     # optim
     parser.add_argument('--base_lr', type=float, default=1e-2, help='initial learning rate')

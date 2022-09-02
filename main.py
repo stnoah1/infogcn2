@@ -118,9 +118,10 @@ class Processor():
             k=self.arg.k,
             base_channel=self.arg.base_channel,
             device=self.device,
+            dct=self.arg.dct,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
-        self.recon_loss = nn.MSELoss(reduce=None).to(self.device)
+        self.recon_loss = self.model.recon_loss
 
         if self.arg.weights:
             self.print_log('Load weights from {}.'.format(self.arg.weights))
@@ -225,7 +226,7 @@ class Processor():
             y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
             cls_loss = self.cls_loss(y_hat, y)
             # x_gt = x[:, :, t_obs:, ...]
-            recon_loss = (self.recon_loss(x_hat, x) * (x != 0)).mean()
+            recon_loss = self.recon_loss(x_hat, x)
             loss = 0 * cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
 
             # backward
@@ -251,11 +252,11 @@ class Processor():
                 f"ACC:{self.log_acc.avg:.3f}, " \
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
                 f"KL:{self.log_kl_div.avg:.3f}, " \
-                f"RECON:{self.log_recon_loss.avg:.3f}, " \
+                f"RECON:{self.log_recon_loss.avg:.5f}, " \
             )
 
-        # with open(f"results/x_hat_list_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}.pkl", 'wb') as fp:
-            # pickle.dump({"x_hat":x_hat, "x":x}, fp)
+        with open(f"results/x_hat_list_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
+            pickle.dump({"x_hat":x_hat, "x":x}, fp)
         # statistics of time consumption and loss
         if save_model:
             state_dict = self.model.state_dict()
@@ -291,7 +292,7 @@ class Processor():
 
                     y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
                     cls_loss = self.cls_loss(y_hat, y)
-                    recon_loss = (self.recon_loss(x_hat, x) * (x != 0)).mean()
+                    recon_loss = (self.recon_loss(x_hat, x) * (x != 0)).sum() / (x != 0).sum() ## TODO class
                     loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
@@ -311,7 +312,7 @@ class Processor():
                     f"ACC:{self.log_acc.avg:.3f}, " \
                     f"CLS:{self.log_cls_loss.avg:.3f}, " \
                     f"KL:{self.log_kl_div.avg:.3f}, " \
-                    f"RECON:{self.log_recon_loss.avg:.3f}, " \
+                    f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 )
 
             score = np.concatenate(score_frag)

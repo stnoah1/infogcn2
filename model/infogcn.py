@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torch_dct as dct
 
 from torch import nn
 
@@ -44,7 +45,7 @@ class DiffeqSolver(nn.Module):
 
 
 class ODEFunc(nn.Module):
-    def __init__(self, dim, A):
+    def __init__(self, dim, A, T=64):
         super(ODEFunc, self).__init__()
         self.layers = []
         self.A = A
@@ -52,10 +53,14 @@ class ODEFunc(nn.Module):
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
         self.conv3 = nn.Conv2d(dim, dim, 1)
+        # self.pos_embedding = nn.Parameter(torch.randn(1, dim, T*2, 1))
         # self.conv4 = nn.Conv2d(dim, dim, 1)
 
-    def forward(self, t, x, bacwards=False):
+    def forward(self, t, x, backwards=False):
         # TODO:refactroing
+        # TODO:temporal embedding
+        # t = int(t.item())
+        # x = x + self.pos_embedding[:,:,t:t+1]
         x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
         x = self.relu(x)
@@ -66,19 +71,21 @@ class ODEFunc(nn.Module):
         x = self.conv3(x)
         x = self.relu(x)
 
-        if bacwards:
+        if backwards:
             x = -x
         return x
 
 
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method=None,
-                 graph=None, in_channels=3, num_head=3, k=0, base_channel=64, device='cuda'):
+                 graph=None, in_channels=3, num_head=3, k=0, base_channel=64, device='cuda',
+                 dct=True):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
         self.Graph = import_class(graph)()
         A = np.stack([self.Graph.A_norm] * num_head, axis=0)
+        self.dct = dct
 
         self.num_class = num_class
         self.num_point = num_point
@@ -87,7 +94,7 @@ class InfoGCN(nn.Module):
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
         self.data_bn = nn.BatchNorm1d(num_person * base_channel * num_point)
         bn_init(self.data_bn, 1)
-        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm)).to(device)
+        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
 
         self.diffeq_solver = DiffeqSolver(ode_func, ode_solver_method,
             odeint_rtol=1e-5, odeint_atol=1e-4, device=device)
@@ -106,24 +113,31 @@ class InfoGCN(nn.Module):
 
         self.cls_decoder =  nn.Sequential(
             EncodingBlock(base_channel, base_channel, A),
-            EncodingBlock(base_channel, base_channel, A),
-            EncodingBlock(base_channel, base_channel, A),
-            EncodingBlock(base_channel, base_channel*2, A, stride=2),
-            EncodingBlock(base_channel*2, base_channel*2, A),
-            EncodingBlock(base_channel*2, base_channel*2, A),
-            EncodingBlock(base_channel*2, base_channel*4, A, stride=2),
-            EncodingBlock(base_channel*4, base_channel*4, A),
-            EncodingBlock(base_channel*4, base_channel*4, A),
+            # EncodingBlock(base_channel, base_channel, A),
+            # EncodingBlock(base_channel, base_channel, A),
+            # EncodingBlock(base_channel, base_channel*2, A, stride=2),
+            # EncodingBlock(base_channel*2, base_channel*2, A),
+            # EncodingBlock(base_channel*2, base_channel*2, A),
+            # EncodingBlock(base_channel*2, base_channel*4, A, stride=2),
+            # EncodingBlock(base_channel*4, base_channel*4, A),
+            # EncodingBlock(base_channel*4, base_channel*4, A),
         )
 
         self.classifier = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(base_channel*4, num_class)
+            nn.Linear(base_channel, num_class)
         )
 
+        # self.classifier = nn.Sequential(
+            # nn.ReLU(),
+            # nn.Linear(base_channel*4, num_class)
+        # )
+
+
     def recon_loss(self, x, x_hat):
-        # todo: mask empty
-        return F.mse_loss(x, x_hat, reduction='mean')
+        recon_loss = (F.mse_loss(x_hat, x, reduce=None) * (x != 0)).sum()\
+            / (x != 0).sum()
+        return recon_loss
 
 
     def KL_div(self, fp_mu, fp_std, kl_coef=1):
@@ -146,9 +160,9 @@ class InfoGCN(nn.Module):
 
     def forward(self, x, t):
 
-        # data preparation
+        # dct
         N, C, T, V, M = x.size()
-        x = rearrange(x, 'n c t v m -> (n m t) v c', m=M, v=V)
+        x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
         x = self.A_vector.to(x.device).to(x.dtype).expand(N*M*T, -1, -1) @ x
 
         # embedding
@@ -164,8 +178,8 @@ class InfoGCN(nn.Module):
         # extrapoloation
         # TODO: kl_div
         # fp_enc = sample_standard_gaussian(fp_mu, fp_std)
-        fp_enc = fp_mu
-        z = self.diffeq_solver(fp_enc, t)
+        z0 = fp_mu
+        z = self.diffeq_solver(z0, t)
 
         # cls_decoding
         # TODO: match the dimmension
@@ -178,6 +192,5 @@ class InfoGCN(nn.Module):
 
         # recon_decoding
         x_hat = self.recon_decoder(z)
-        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=M)
-
-        return y, x_hat, kl_div
+        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', n=N, m=M)
+       return y, x_hat, kl_div
