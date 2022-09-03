@@ -14,6 +14,7 @@ import apex
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch_dct as dct
 import numpy as np
 
 from tqdm import tqdm
@@ -118,7 +119,6 @@ class Processor():
             k=self.arg.k,
             base_channel=self.arg.base_channel,
             device=self.device,
-            dct=self.arg.dct,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = self.model.recon_loss
@@ -178,12 +178,21 @@ class Processor():
             os.makedirs(self.arg.work_dir)
 
     def adjust_learning_rate(self, epoch):
-        if self.arg.optimizer == 'SGD' or self.arg.optimizer == 'Adam':
+        if self.arg.optimizer == 'SGD':
             if epoch < self.arg.warm_up_epoch and self.arg.weights is None:
                 lr = self.arg.base_lr * (epoch + 1) / self.arg.warm_up_epoch
             else:
                 lr = self.arg.base_lr * (
                         self.arg.lr_decay_rate ** np.sum(epoch >= np.array(self.arg.step)))
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = lr
+            return lr
+        elif self.arg.optimizer == 'Adam':
+            if epoch < self.arg.warm_up_epoch and self.arg.weights is None:
+                lr = self.arg.base_lr * (epoch + 1) / self.arg.warm_up_epoch
+            else:
+                lr = self.arg.base_lr * (
+                        self.arg.lr_decay_rate ** (epoch - self.arg.warm_up_epoch))
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = lr
             return lr
@@ -226,7 +235,12 @@ class Processor():
             y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
             cls_loss = self.cls_loss(y_hat, y)
             # x_gt = x[:, :, t_obs:, ...]
-            recon_loss = self.recon_loss(x_hat, x)
+            if self.arg.dct:
+                x_hat_dct = dct.dct(x_hat)
+                x_gt_dct = dct.dct(x)
+                recon_loss = self.recon_loss(x_hat_dct, x_gt_dct)
+            else:
+                recon_loss = self.recon_loss(x_hat, x)
             loss = 0 * cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
 
             # backward
@@ -292,7 +306,12 @@ class Processor():
 
                     y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
                     cls_loss = self.cls_loss(y_hat, y)
-                    recon_loss = (self.recon_loss(x_hat, x) * (x != 0)).sum() / (x != 0).sum() ## TODO class
+                    if self.arg.dct:
+                        x_hat_dct = dct.dct(x_hat)
+                        x_gt_dct = dct.dct(x)
+                        recon_loss = self.recon_loss(x_hat_dct, x_gt_dct)
+                    else:
+                        recon_loss = self.recon_loss(x_hat, x)
                     loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())

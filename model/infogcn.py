@@ -77,7 +77,7 @@ class ODEFunc(nn.Module):
 
 
 class InfoGCN(nn.Module):
-    def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method=None,
+    def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, device='cuda',
                  dct=True):
         super(InfoGCN, self).__init__()
@@ -193,4 +193,4 @@ class InfoGCN(nn.Module):
         # recon_decoding
         x_hat = self.recon_decoder(z)
         x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', n=N, m=M)
-       return y, x_hat, kl_div
+        return y, x_hat, kl_div
