@@ -55,6 +55,7 @@ class Processor():
         self.best_acc = 0
         self.best_acc_epoch = 0
         self.log_recon_loss = AverageMeter()
+        self.log_recon_2d_loss = AverageMeter()
         self.log_cls_loss = AverageMeter()
         self.log_acc = AverageMeter()
         self.log_kl_div = AverageMeter()
@@ -217,7 +218,7 @@ class Processor():
         self.log_acc.reset()
         self.log_cls_loss.reset()
         self.log_kl_div.reset()
-        self.log_recon_loss.reset()
+        self.log_recon_2d_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
         self.adjust_learning_rate(epoch)
 
@@ -228,20 +229,21 @@ class Processor():
             x = x.float().to(self.device)
             y = y.long().to(self.device)
             t_obs = int(self.arg.obs*T)
-            # t_pred =  T - t_obs
-            # t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
-            t = torch.linspace(0, T - 1, T).to(self.device)
+            t_pred =  T - t_obs
+            t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
 
-            y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
+            y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t, training=True)
             cls_loss = self.cls_loss(y_hat, y)
-            # x_gt = x[:, :, t_obs:, ...]
+            x_gt = x[:, :, t_obs:, ...]
             if self.arg.dct:
                 x_hat_dct = dct.dct(x_hat)
-                x_gt_dct = dct.dct(x)
+                x_gt_dct = dct.dct(x_gt)
                 recon_loss = self.recon_loss(x_hat_dct, x_gt_dct)
+                recon_aux_loss = self.recon_loss(x_hat, x_gt).detach()
             else:
-                recon_loss = self.recon_loss(x_hat, x)
-            loss = 0 * cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
+                recon_loss = self.recon_loss(x_hat, x_gt)
+                recon_aux_loss = 0.
+            loss = recon_loss + self.arg.lambda_1 * cls_loss + self.arg.lambda_2 * kl_div
 
             # backward
             self.optimizer.zero_grad()
@@ -260,6 +262,7 @@ class Processor():
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
+            self.log_recon_2d_loss.update(recon_aux_loss.data.item(), B)
 
             tbar.set_description(
                 f"[Epoch #{epoch}]"\
@@ -267,10 +270,11 @@ class Processor():
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
                 f"KL:{self.log_kl_div.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
+                f"RECON:{self.log_recon_2d_loss.avg:.5f}, " \
             )
 
-        with open(f"results/x_hat_list_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
-            pickle.dump({"x_hat":x_hat, "x":x}, fp)
+        with open(f"results/{self.arg.obs}/x_hat_list_train_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
+            pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
         # statistics of time consumption and loss
         if save_model:
             state_dict = self.model.state_dict()
@@ -284,6 +288,7 @@ class Processor():
         self.log_cls_loss.reset()
         self.log_kl_div.reset()
         self.log_recon_loss.reset()
+        self.log_recon_2d_loss.reset()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
         for ln in loader_name:
             loss_value = []
@@ -300,19 +305,21 @@ class Processor():
                     x = x.float().to(self.device)
                     y = y.long().to(self.device)
                     t_obs = int(self.arg.obs*T)
-                    # t_pred =  T - t_obs
-                    # t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
-                    t = torch.linspace(0, T - 1, T).to(self.device)
+                    t_pred =  T - t_obs
+                    t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
 
-                    y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t)
+                    y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t, training=False)
                     cls_loss = self.cls_loss(y_hat, y)
+                    x_gt = x[:, :, t_obs:, ...]
                     if self.arg.dct:
                         x_hat_dct = dct.dct(x_hat)
-                        x_gt_dct = dct.dct(x)
+                        x_gt_dct = dct.dct(x_gt)
                         recon_loss = self.recon_loss(x_hat_dct, x_gt_dct)
+                        recon_aux_loss = self.recon_loss(x_hat, x_gt).detach()
                     else:
-                        recon_loss = self.recon_loss(x_hat, x)
-                    loss = cls_loss + self.arg.lambda_1 * recon_loss + self.arg.lambda_2 * kl_div
+                        recon_loss = self.recon_loss(x_hat, x_gt)
+                        recon_aux_loss = 0.
+                    loss = recon_loss + self.arg.lambda_1 * cls_loss + self.arg.lambda_2 * kl_div
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
                     cls_loss_value.append(cls_loss.data.item())
@@ -324,6 +331,7 @@ class Processor():
                 self.log_acc.update((predict_label == y.data).float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
+                self.log_recon_2d_loss.update(recon_aux_loss.data.item(), B)
                 self.log_kl_div.update(kl_div.data.item(), B)
 
                 tbar.set_description(
@@ -332,7 +340,11 @@ class Processor():
                     f"CLS:{self.log_cls_loss.avg:.3f}, " \
                     f"KL:{self.log_kl_div.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
+                    f"RECON2D:{self.log_recon_2d_loss.avg:.5f}, " \
                 )
+
+            with open(f"results/{self.arg.obs}/x_hat_list_eval_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
+                pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
 
             score = np.concatenate(score_frag)
 
