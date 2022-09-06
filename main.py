@@ -20,9 +20,9 @@ import numpy as np
 from tqdm import tqdm
 
 from args import get_parser
-from loss import LabelSmoothingCrossEntropy
+from loss import LabelSmoothingCrossEntropy, masked_recon_loss
 from model.infogcn import InfoGCN
-from utils import AverageMeter, import_class, masked_recon_loss
+from utils import AverageMeter, import_class
 
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
