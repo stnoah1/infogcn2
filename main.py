@@ -22,7 +22,7 @@ from tqdm import tqdm
 from args import get_parser
 from loss import LabelSmoothingCrossEntropy
 from model.infogcn import InfoGCN
-from utils import AverageMeter, import_class
+from utils import AverageMeter, import_class, masked_recon_loss
 
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
@@ -122,7 +122,7 @@ class Processor():
             device=self.device,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
-        self.recon_loss = self.model.recon_loss
+        self.recon_loss = masked_recon_loss
 
         if self.arg.weights:
             self.print_log('Load weights from {}.'.format(self.arg.weights))
@@ -218,6 +218,7 @@ class Processor():
         self.log_acc.reset()
         self.log_cls_loss.reset()
         self.log_kl_div.reset()
+        self.log_recon_loss.reset()
         self.log_recon_2d_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
         self.adjust_learning_rate(epoch)
@@ -228,21 +229,20 @@ class Processor():
             B, _, T, _, _ = x.shape
             x = x.float().to(self.device)
             y = y.long().to(self.device)
-            t_obs = int(self.arg.obs*T)
-            t_pred =  T - t_obs
-            t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
+            t = int(T*self.arg.obs)
+            x_gt = x
+            mask = (abs(x) > 1e-5)
 
-            y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t, training=True)
+            y_hat, x_hat, kl_div = self.model(x, t, training=True)
             cls_loss = self.cls_loss(y_hat, y)
-            x_gt = x[:, :, t_obs:, ...]
             if self.arg.dct:
                 x_hat_dct = dct.dct(x_hat)
                 x_gt_dct = dct.dct(x_gt)
-                recon_loss = self.recon_loss(x_hat_dct, x_gt_dct)
-                recon_aux_loss = self.recon_loss(x_hat, x_gt).detach()
+                recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask)
+                recon_aux_loss = self.recon_loss(x_hat, x_gt, mask).detach()
             else:
-                recon_loss = self.recon_loss(x_hat, x_gt)
-                recon_aux_loss = 0.
+                recon_loss = self.recon_loss(x_hat, x_gt, mask)
+                recon_aux_loss = torch.tensor(0.)
             loss = recon_loss + self.arg.lambda_1 * cls_loss + self.arg.lambda_2 * kl_div
 
             # backward
@@ -270,7 +270,7 @@ class Processor():
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
                 f"KL:{self.log_kl_div.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
-                f"RECON:{self.log_recon_2d_loss.avg:.5f}, " \
+                f"RECON2D:{self.log_recon_2d_loss.avg:.5f}, " \
             )
 
         with open(f"results/{self.arg.obs}/x_hat_list_train_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
@@ -304,21 +304,20 @@ class Processor():
                     B, _, T, _, _ = x.shape
                     x = x.float().to(self.device)
                     y = y.long().to(self.device)
-                    t_obs = int(self.arg.obs*T)
-                    t_pred =  T - t_obs
-                    t = torch.linspace(0, t_pred - 1, t_pred).to(self.device)
+                    t = int(T*self.arg.obs)
+                    x_gt = x
+                    mask = (abs(x) > 1e-5)
 
-                    y_hat, x_hat, kl_div = self.model(x[:, :, :t_obs, ...], t, training=False)
+                    y_hat, x_hat, kl_div = self.model(x, t, training=False)
                     cls_loss = self.cls_loss(y_hat, y)
-                    x_gt = x[:, :, t_obs:, ...]
                     if self.arg.dct:
                         x_hat_dct = dct.dct(x_hat)
                         x_gt_dct = dct.dct(x_gt)
-                        recon_loss = self.recon_loss(x_hat_dct, x_gt_dct)
-                        recon_aux_loss = self.recon_loss(x_hat, x_gt).detach()
+                        recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask)
+                        recon_aux_loss = self.recon_loss(x_hat, x_gt, mask).detach()
                     else:
-                        recon_loss = self.recon_loss(x_hat, x_gt)
-                        recon_aux_loss = 0.
+                        recon_loss = self.recon_loss(x_hat, x_gt, mask)
+                        recon_aux_loss = torch.tensor(0.)
                     loss = recon_loss + self.arg.lambda_1 * cls_loss + self.arg.lambda_2 * kl_div
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())

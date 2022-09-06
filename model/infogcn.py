@@ -1,4 +1,5 @@
 import numpy as np
+import random
 import torch
 import torch.nn.functional as F
 import torch_dct as dct
@@ -43,6 +44,39 @@ class DiffeqSolver(nn.Module):
         # b c t v
         return pred_y
 
+class ODEEulerSolver(nn.Module):
+    def __init__(self, latent_dim, ode_func, T, device = torch.device("cpu")):
+
+        super(ODEEulerSolver, self).__init__()
+
+        self.latent_dim = latent_dim
+        self.device = device
+        self.ode = ode_func
+
+    def forward(self, h, t_obs, run_backwards=False, training=True):
+        # data : B C T V
+        B, C, T, V = h.shape
+
+        time_set = list(range(T))
+
+        if run_backwards:
+            time_set = time_set[::-1]
+
+        if training:
+            zs = [h[:,:,0:1,:]]
+            for t in range(1, T):
+                z_t = torch.where((torch.rand(B,1,1,1).cuda() < 0.5).expand_as(zs[0]), zs[t-1], h[:,:,t-1:t,:])
+                z_next = z_t + self.ode(t, z_t)
+                zs.append(z_next)
+        else:
+            zs = [h[:,:,t:t+1,:] for t in range(t_obs)]
+            for t in range(t_obs, T):
+                z_t = zs[t-1]
+                z_next = z_t + self.ode(t, z_t)
+                zs.append(z_next)
+
+        z_hat = torch.cat(zs, dim=2)
+        return z_hat
 
 class ODEFunc(nn.Module):
     def __init__(self, dim, A, T=64):
@@ -53,6 +87,8 @@ class ODEFunc(nn.Module):
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
         self.conv3 = nn.Conv2d(dim, dim, 1)
+        self.linear = nn.Conv2d(dim, dim, 1)
+        self.temporal_pe = self.init_pe(T, dim)
         # self.pos_embedding = nn.Parameter(torch.randn(1, dim, T*2, 1))
         # self.conv4 = nn.Conv2d(dim, dim, 1)
 
@@ -60,7 +96,7 @@ class ODEFunc(nn.Module):
         # TODO:refactroing
         # TODO:temporal embedding
         # t = int(t.item())
-        # x = x + self.pos_embedding[:,:,t:t+1]
+        x = x + self.temporal_pe[:,:,t:t+1]
         x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
         x = self.relu(x)
@@ -70,11 +106,22 @@ class ODEFunc(nn.Module):
         x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv3(x)
         x = self.relu(x)
-
+        x = self.linear(x)
         if backwards:
             x = -x
         return x
 
+
+    def init_pe(self, length, d_model):
+        import math
+        pe = torch.zeros(length, d_model)
+        position = torch.arange(0, length).unsqueeze(1)
+        div_term = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float) *
+                            -(math.log(10000.0) / d_model)))
+        pe[:, 0::2] = torch.sin(position.float() * div_term)
+        pe[:, 1::2] = torch.cos(position.float() * div_term)
+        pe = pe.transpose(-2,-1).view(1, d_model, length, 1)
+        return pe.cuda()
 
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method='rk4',
@@ -96,14 +143,13 @@ class InfoGCN(nn.Module):
         bn_init(self.data_bn, 1)
         ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
 
-        self.diffeq_solver = DiffeqSolver(ode_func, ode_solver_method,
-            odeint_rtol=1e-5, odeint_atol=1e-4, device=device)
+        self.diffeq_solver = ODEEulerSolver(base_channel, ode_func, T=64)
 
         self.encoder = nn.Sequential(
             SA_GC(base_channel, base_channel, A),
             SA_GC(base_channel, base_channel, A),
+            nn.Conv2d(base_channel, base_channel, 1),
         )
-        self.encoder_z0 = Encoder_z0_RNN(base_channel, A, device)
 
         self.recon_decoder = nn.Sequential(
             SA_GC(base_channel, base_channel, A),
@@ -113,8 +159,8 @@ class InfoGCN(nn.Module):
 
         self.cls_decoder =  nn.Sequential(
             EncodingBlock(base_channel, base_channel, A),
-            # EncodingBlock(base_channel, base_channel, A),
-            # EncodingBlock(base_channel, base_channel, A),
+            EncodingBlock(base_channel, base_channel, A),
+            EncodingBlock(base_channel, base_channel, A),
             # EncodingBlock(base_channel, base_channel*2, A, stride=2),
             # EncodingBlock(base_channel*2, base_channel*2, A),
             # EncodingBlock(base_channel*2, base_channel*2, A),
@@ -134,11 +180,6 @@ class InfoGCN(nn.Module):
         # )
 
 
-    def recon_loss(self, x, x_hat):
-        recon_loss = (F.mse_loss(x_hat, x, reduce=None) * (x != 0)).sum()\
-            / (x != 0).sum()
-        return recon_loss
-
 
     def KL_div(self, fp_mu, fp_std, kl_coef=1):
         fp_distr = Normal(fp_mu, fp_std)
@@ -150,7 +191,6 @@ class InfoGCN(nn.Module):
             raise Exception("kldiv_z0 is Nan!")
 
         loss = kldiv_z0.mean()
-        # loss = -torch.logsumexp(-kl_coef * kldiv_z0,0)
         return loss
 
     def get_A(self, k):
@@ -158,7 +198,7 @@ class InfoGCN(nn.Module):
         I = np.eye(self.Graph.num_node)
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
-    def forward(self, x, t):
+    def forward(self, x, t, training=True):
 
         # dct
         N, C, T, V, M = x.size()
@@ -172,20 +212,14 @@ class InfoGCN(nn.Module):
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N, v=V)
         x = self.encoder(x)
-        fp_mu, fp_std = self.encoder_z0(x, run_backwards=True)
-        kl_div = self.KL_div(fp_mu, fp_std)
-
-        # extrapoloation
-        # TODO: kl_div
-        # fp_enc = sample_standard_gaussian(fp_mu, fp_std)
-        z0 = fp_mu
-        z = self.diffeq_solver(z0, t)
+        z = self.diffeq_solver(x, t, training=training)
+        kl_div = torch.tensor(0.0)
 
         # cls_decoding
         # TODO: match the dimmension
-        # x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
-        # x = self.data_bn(x)
-        # x = rearrange(x, 'n (m v c) t -> (n m) c t v', m=M, v=V)
+        # z = rearrange(z, '(n m) c t v -> n (m v c) t', m=M, n=N)
+        # z = self.data_bn(z)
+        # z = rearrange(z, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         y = self.cls_decoder(z)
         y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
         y = self.classifier(y)

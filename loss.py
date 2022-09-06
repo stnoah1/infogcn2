@@ -24,6 +24,10 @@ def constraint_reg(pred, ratio=3):
         loss += torch.abs(arm_len/ratio - hand_len)
     return torch.mean(loss)
 
+def masked_recon_loss(x, x_hat, mask):
+    recon_loss = (F.mse_loss(x_hat, x, reduce=None) * mask).sum()\
+        / mask.sum()
+    return recon_loss
 
 class ReconLoss(nn.Module):
     def __init__(self, p=2):
@@ -34,7 +38,6 @@ class ReconLoss(nn.Module):
         B, V, C = pred.shape
         loss = self.loss(pred.contiguous().view(-1, C), gt.contiguous().view(-1, C))
         return loss.view(B, V).mean(-1).mean(-1)
-
 
 class CosineSimilarity(nn.Module):
     def __init__(self):
