@@ -6,6 +6,7 @@ import numpy as np
 from torch import nn, einsum
 from einops import rearrange
 from torch.autograd import Variable
+from einops.layers.torch import Rearrange
 
 
 from model.ms_tcn import MultiScale_TemporalConv as MS_TCN
@@ -192,4 +193,178 @@ class EncodingBlock(nn.Module):
     def forward(self, x, attn=None):
         y = self.relu(self.tcn(self.agcn(x, attn)) + self.residual(x))
         return y
+
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fn = fn
+    def forward(self, x, **kwargs):
+        return self.fn(self.norm(x), **kwargs)
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout = 0.):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
+    def forward(self, x):
+        return self.net(x)
+
+class Attention(nn.Module):
+    def __init__(self, dim, seq_len, heads=8, dim_head=64, dropout=0., use_mask=False):
+        super().__init__()
+        inner_dim = dim_head *  heads
+        project_out = not (heads == 1 and dim_head == dim)
+
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+        self.use_mask = use_mask
+
+        self.attend = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
+
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.register_buffer("mask", torch.ones(seq_len, seq_len).tril().rot90()
+                                     .view(1, 1, seq_len, seq_len))
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        ) if project_out else nn.Identity()
+
+    def forward(self, x):
+        B, T, C = x.shape
+
+        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
+
+        attn = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+
+        if self.use_mask:
+            attn = attn.masked_fill(self.mask[:,:,:T,:T] == 0, 0)
+        else:
+            attn = self.attend(attn)
+        attn = self.dropout(attn)
+
+        out = torch.matmul(attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        return self.to_out(out), attn
+
+class Transformer(nn.Module):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, max_seq_len, dropout=0., use_mask=True):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                PreNorm(dim, Attention(
+                    dim, max_seq_len, heads=heads, dim_head=dim_head,
+                    dropout=dropout, use_mask=use_mask)
+                ),
+                PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
+            ]))
+        self._attns = []
+    def forward(self, x):
+        attns = []
+        for attn, ff in self.layers:
+            res = x
+            x, sa = attn(x)
+            x += res
+            x = ff(x) + x
+            attns.append(sa.clone())
+        self._attns = attns
+        return x
+
+def PositionalEncoding(d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(1, max_len, d_model)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
+        return pe
+
+
+
+class ViT(nn.Module):
+    def __init__(self, seq_len, dim_in, dim_out, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0.):
+        super().__init__()
+
+        self.to_embedding = nn.Sequential(
+            Rearrange('b c t v -> (b v) t c', t=seq_len),
+            nn.Linear(dim_in, dim),
+        )
+
+        # self.pos_embedding = nn.Parameter(torch.randn(1, seq_len, dim))
+        self.pe = PositionalEncoding(d_model=dim, max_len=seq_len)
+        self.dropout = nn.Dropout(emb_dropout)
+
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout)
+
+        self.to_latent = nn.Identity()
+
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, dim_out)
+        )
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear)):
+            module.weight.data.normal_(mean=0.0, std=0.02)
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+
+    def forward(self, x):
+        """
+        in : b t c h w
+        out : b t c h w
+        """
+        B, C, T, V = x.shape
+        x = self.to_embedding(x)
+        x = x + self.pe[:, :T, :].to(x.device)
+        # x = self.pos_embedding(x)
+        x = self.transformer(x)
+        x = self.to_latent(x)
+        x = self.mlp_head(x)
+        x = rearrange(x, '(b v) t c -> b c t v', v=V)
+        return x
+
+
+class TemporalEncoder(nn.Module):
+    def __init__(self, seq_len, latent_dim, input_dim, device = torch.device("cpu")):
+
+        super(TemporalEncoder, self).__init__()
+        self.transformer = ViT(seq_len, input_dim, latent_dim*2, latent_dim, depth=4, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4)
+
+        self.latent_dim = latent_dim
+        self.device = device
+
+        self.hiddens_to_z0 = nn.Sequential(
+            nn.Conv2d(self.latent_dim, self.latent_dim, 1),
+            nn.ReLU(),
+            nn.Conv2d(self.latent_dim, self.latent_dim * 2, 1)
+        )
+        self.init_network_weights()
+
+    def init_network_weights(self, std = 0.1):
+        for m in self.hiddens_to_z0.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, mean=0, std=std)
+                nn.init.constant_(m.bias, val=0)
+
+
+    def forward(self, data):
+        # IMPORTANT: assumes that 'data' already has mask concatenated to it
+        # data : B C T V
+
+        output = self.transformer(data)
+
+        # why unsqueezed?
+        return output[:, :self.latent_dim, ...], output[:, self.latent_dim:, ...].abs()
 
