@@ -66,13 +66,15 @@ class ODEEulerSolver(nn.Module):
             zs = [h[:,:,0:1,:]]
             for t in range(1, T):
                 z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 0.5).expand_as(zs[0]), zs[t-1], h[:,:,t-1:t,:])
-                z_next = z_t + self.ode(t, z_t)
+                z_prime = self.ode(t, z_t)
+                z_next = z_t + z_prime
                 zs.append(z_next)
         else:
             zs = [h[:,:,t:t+1,:] for t in range(t_obs)]
             for t in range(t_obs, T):
                 z_t = zs[t-1]
-                z_next = z_t + self.ode(t, z_t)
+                z_prime = self.ode(t, z_t)
+                z_next = z_t + z_prime
                 zs.append(z_next)
 
         z_hat = torch.cat(zs, dim=2)
@@ -82,8 +84,10 @@ class ODEFunc(nn.Module):
     def __init__(self, dim, A, T=64):
         super(ODEFunc, self).__init__()
         self.layers = []
-        self.A = A
-        self.relu = nn.ReLU(inplace=True)
+        self.A1 = nn.Parameter(torch.rand(25,25))
+        self.A2 = nn.Parameter(torch.rand(25,25))
+        self.A3 = nn.Parameter(torch.rand(25,25))
+        self.tanh = nn.Tanh()
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
         self.conv3 = nn.Conv2d(dim, dim, 1)
@@ -96,15 +100,15 @@ class ODEFunc(nn.Module):
         # TODO:refactroing
         # t = int(t.item())
         x = x + self.temporal_pe[:,:,t:t+1]
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,nctu->nctv', self.A1.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
-        x = self.relu(x)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
+        x = self.tanh(x)
+        x = torch.einsum('vu,nctu->nctv', self.A2.to(x.device).to(x.dtype), x)
         x = self.conv2(x)
-        x = self.relu(x)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
+        x = self.tanh(x)
+        x = torch.einsum('vu,nctu->nctv', self.A3.to(x.device).to(x.dtype), x)
         x = self.conv3(x)
-        x = self.relu(x)
+        x = self.tanh(x)
         x = self.linear(x)
         if backwards:
             x = -x
@@ -208,10 +212,14 @@ class InfoGCN(nn.Module):
 
         # embedding
         x = self.to_joint_embedding(x)
-        x += self.pos_embedding[:, :self.num_point]
+        x = x + self.pos_embedding[:, :self.num_point]
+
+        x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
+        x = self.data_bn(x)
+        x = rearrange(x, 'n (m v c) t -> (n m t) v c', m=M, v=V)
 
         # encoding
-        x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N, v=V)
+        x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
         x = self.spatial_encoder(x)
         x, _ = self.temporal_encoder(x)
         z = self.diffeq_solver(x, t, training=training)
@@ -219,9 +227,6 @@ class InfoGCN(nn.Module):
 
         # cls_decoding
         # TODO: match the dimmension
-        # z = rearrange(z, '(n m) c t v -> n (m v c) t', m=M, n=N)
-        # z = self.data_bn(z)
-        # z = rearrange(z, 'n (m v c) t -> (n m) c t v', m=M, v=V)
         y = self.cls_decoder(z)
         y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
         y = self.classifier(y)

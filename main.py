@@ -179,21 +179,12 @@ class Processor():
             os.makedirs(self.arg.work_dir)
 
     def adjust_learning_rate(self, epoch):
-        if self.arg.optimizer == 'SGD':
+        if self.arg.optimizer == 'SGD' or self.arg.optimizer == 'Adam' :
             if epoch < self.arg.warm_up_epoch and self.arg.weights is None:
                 lr = self.arg.base_lr * (epoch + 1) / self.arg.warm_up_epoch
             else:
                 lr = self.arg.base_lr * (
                         self.arg.lr_decay_rate ** np.sum(epoch >= np.array(self.arg.step)))
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = lr
-            return lr
-        elif self.arg.optimizer == 'Adam':
-            if epoch < self.arg.warm_up_epoch and self.arg.weights is None:
-                lr = self.arg.base_lr * (epoch + 1) / self.arg.warm_up_epoch
-            else:
-                lr = self.arg.base_lr * (
-                        self.arg.lr_decay_rate ** (epoch - self.arg.warm_up_epoch))
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = lr
             return lr
