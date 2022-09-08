@@ -68,7 +68,7 @@ class ODESolver(nn.Module):
         if training:
             zs = [h[:,:,0:1,:]]
             for t in range(0, T-1):
-                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 0.8).expand_as(zs[0]), zs[t], h[:,:,t:t+dt,:])
+                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 0.5).expand_as(zs[0]), zs[t], h[:,:,t:t+1,:])
                 k1 = self.ode(t, z_t)
                 k2 = self.ode(t + dt * _one_third, z_t + dt * k1 * _one_third)
                 k3 = self.ode(t + dt * _two_thirds, z_t + dt * (k2 - k1 * _one_third))
@@ -93,7 +93,9 @@ class ODEFunc(nn.Module):
     def __init__(self, dim, A, T=64):
         super(ODEFunc, self).__init__()
         self.layers = []
-        self.A = A
+        self.A1 = nn.Parameter(torch.rand(25, 25))
+        self.A2 = nn.Parameter(torch.rand(25, 25))
+        self.A3 = nn.Parameter(torch.rand(25, 25))
         self.tanh = nn.Tanh()
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
@@ -107,13 +109,13 @@ class ODEFunc(nn.Module):
         # TODO:refactroing
         # t = int(t.item())
         x = x + self.temporal_pe[:,:,int(3*t):int(3*t)+1]
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,nctu->nctv', self.A1.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
         x = self.tanh(x)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,nctu->nctv', self.A2.to(x.device).to(x.dtype), x)
         x = self.conv2(x)
         x = self.tanh(x)
-        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,nctu->nctv', self.A3.to(x.device).to(x.dtype), x)
         x = self.conv3(x)
         x = self.tanh(x)
         x = self.proj(x)
