@@ -44,10 +44,10 @@ class DiffeqSolver(nn.Module):
         # b c t v
         return pred_y
 
-class ODEEulerSolver(nn.Module):
+class ODESolver(nn.Module):
     def __init__(self, latent_dim, ode_func, T, device = torch.device("cpu")):
 
-        super(ODEEulerSolver, self).__init__()
+        super(ODESolver, self).__init__()
 
         self.latent_dim = latent_dim
         self.device = device
@@ -58,23 +58,32 @@ class ODEEulerSolver(nn.Module):
         B, C, T, V = h.shape
 
         time_set = list(range(T))
+        _one_third = 1 / 3
+        _two_thirds = 2 / 3
 
         if run_backwards:
             time_set = time_set[::-1]
 
+        dt = 1
         if training:
             zs = [h[:,:,0:1,:]]
-            for t in range(1, T):
-                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 1.0).expand_as(zs[0]), zs[t-1], h[:,:,t-1:t,:])
-                z_prime = self.ode(t, z_t)
-                z_next = z_t + z_prime
+            for t in range(0, T-1):
+                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 0.8).expand_as(zs[0]), zs[t], h[:,:,t:t+dt,:])
+                k1 = self.ode(t, z_t)
+                k2 = self.ode(t + dt * _one_third, z_t + dt * k1 * _one_third)
+                k3 = self.ode(t + dt * _two_thirds, z_t + dt * (k2 - k1 * _one_third))
+                k4 = self.ode(t + dt, z_t + dt * (k1 - k2 + k3))
+                z_next = (k1 + 3 * (k2 + k3) + k4) * dt * 0.125
                 zs.append(z_next)
         else:
             zs = [h[:,:,t:t+1,:] for t in range(t_obs)]
-            for t in range(t_obs, T):
-                z_t = zs[t-1]
-                z_prime = self.ode(t, z_t)
-                z_next = z_t + z_prime
+            for t in range(t_obs-1, T-1):
+                z_t = zs[t]
+                k1 = self.ode(t, z_t)
+                k2 = self.ode(t + dt * _one_third, z_t + dt * k1 * _one_third)
+                k3 = self.ode(t + dt * _two_thirds, z_t + dt * (k2 - k1 * _one_third))
+                k4 = self.ode(t + dt, z_t + dt * (k1 - k2 + k3))
+                z_next = (k1 + 3 * (k2 + k3) + k4) * dt * 0.125
                 zs.append(z_next)
 
         z_hat = torch.cat(zs, dim=2)
@@ -90,14 +99,14 @@ class ODEFunc(nn.Module):
         self.conv2 = nn.Conv2d(dim, dim, 1)
         self.conv3 = nn.Conv2d(dim, dim, 1)
         self.proj = nn.Conv2d(dim, dim, 1)
-        self.temporal_pe = self.init_pe(T, dim)
+        self.temporal_pe = self.init_pe(3*T, dim)
         # self.pos_embedding = nn.Parameter(torch.randn(1, dim, T*2, 1))
         # self.conv4 = nn.Conv2d(dim, dim, 1)
 
     def forward(self, t, x, backwards=False):
         # TODO:refactroing
         # t = int(t.item())
-        x = x + self.temporal_pe[:,:,t:t+1]
+        x = x + self.temporal_pe[:,:,int(3*t):int(3*t)+1]
         x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
         x = self.tanh(x)
@@ -143,7 +152,7 @@ class InfoGCN(nn.Module):
         bn_init(self.data_bn, 1)
         ode_func = ODEFunc(2*base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
 
-        self.diffeq_solver = ODEEulerSolver(base_channel, ode_func, T=64)
+        self.diffeq_solver = ODESolver(base_channel, ode_func, T=64)
 
         self.spatial_encoder = nn.Sequential(
             SA_GC(base_channel, base_channel, A),
