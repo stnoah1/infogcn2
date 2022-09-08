@@ -57,9 +57,9 @@ def get_parser():
     parser.add_argument('--dct', type=str2bool, default=False, help='')
 
     # optim
-    parser.add_argument('--base_lr', type=float, default=1e-2, help='initial learning rate')
-    parser.add_argument('--step', type=int, default=[90, 100], nargs='+', help='the epoch where optimizer reduce the learning rate')
-    parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
+    parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
+    parser.add_argument('--step', type=int, default=[10, 15], nargs='+', help='the epoch where optimizer reduce the learning rate')
+    parser.add_argument('--optimizer', default='Adam', help='type of optimizer')
     parser.add_argument('--nesterov', type=str2bool, default=True, help='use nesterov or not')
     parser.add_argument('--batch_size', type=int, default=64, help='training batch size')
     parser.add_argument('--test_batch_size', type=int, default=64, help='test batch size')
@@ -67,7 +67,7 @@ def get_parser():
     parser.add_argument('--num_epoch', type=int, default=110, help='stop training in which epoch')
     parser.add_argument('--weight_decay', type=float, default=0.0005, help='weight decay for optimizer')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
-    parser.add_argument('--warm_up_epoch', type=int, default=5)
+    parser.add_argument('--warm_up_epoch', type=int, default=0)
     parser.add_argument('--lambda_1', type=float, default=1e+0)
     parser.add_argument('--lambda_2', type=float, default=0.)
 

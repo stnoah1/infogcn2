@@ -65,7 +65,7 @@ class ODEEulerSolver(nn.Module):
         if training:
             zs = [h[:,:,0:1,:]]
             for t in range(1, T):
-                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 0.5).expand_as(zs[0]), zs[t-1], h[:,:,t-1:t,:])
+                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 1.0).expand_as(zs[0]), zs[t-1], h[:,:,t-1:t,:])
                 z_prime = self.ode(t, z_t)
                 z_next = z_t + z_prime
                 zs.append(z_next)
@@ -84,14 +84,12 @@ class ODEFunc(nn.Module):
     def __init__(self, dim, A, T=64):
         super(ODEFunc, self).__init__()
         self.layers = []
-        self.A1 = nn.Parameter(torch.rand(25,25))
-        self.A2 = nn.Parameter(torch.rand(25,25))
-        self.A3 = nn.Parameter(torch.rand(25,25))
+        self.A = A
         self.tanh = nn.Tanh()
         self.conv1 = nn.Conv2d(dim, dim, 1)
         self.conv2 = nn.Conv2d(dim, dim, 1)
         self.conv3 = nn.Conv2d(dim, dim, 1)
-        self.linear = nn.Conv2d(dim, dim, 1)
+        self.proj = nn.Conv2d(dim, dim, 1)
         self.temporal_pe = self.init_pe(T, dim)
         # self.pos_embedding = nn.Parameter(torch.randn(1, dim, T*2, 1))
         # self.conv4 = nn.Conv2d(dim, dim, 1)
@@ -100,18 +98,17 @@ class ODEFunc(nn.Module):
         # TODO:refactroing
         # t = int(t.item())
         x = x + self.temporal_pe[:,:,t:t+1]
-        x = torch.einsum('vu,nctu->nctv', self.A1.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
         x = self.tanh(x)
-        x = torch.einsum('vu,nctu->nctv', self.A2.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv2(x)
         x = self.tanh(x)
-        x = torch.einsum('vu,nctu->nctv', self.A3.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv3(x)
         x = self.tanh(x)
-        x = self.linear(x)
-        if backwards:
-            x = -x
+        x = self.proj(x)
+
         return x
 
 
@@ -124,7 +121,7 @@ class ODEFunc(nn.Module):
         pe[:, 0::2] = torch.sin(position.float() * div_term)
         pe[:, 1::2] = torch.cos(position.float() * div_term)
         pe = pe.transpose(-2,-1).view(1, d_model, length, 1)
-        return pe.cuda()
+        return pe.cuda() # replace cuda to device
 
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method='rk4',
@@ -144,28 +141,29 @@ class InfoGCN(nn.Module):
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
         self.data_bn = nn.BatchNorm1d(num_person * base_channel * num_point)
         bn_init(self.data_bn, 1)
-        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
+        ode_func = ODEFunc(2*base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
 
         self.diffeq_solver = ODEEulerSolver(base_channel, ode_func, T=64)
 
         self.spatial_encoder = nn.Sequential(
             SA_GC(base_channel, base_channel, A),
             SA_GC(base_channel, base_channel, A),
-            nn.Conv2d(base_channel, base_channel, 1),
+            SA_GC(base_channel, 2*base_channel, A),
+            nn.Conv2d(2*base_channel, 2*base_channel, 1),
         )
 
-        self.temporal_encoder = TemporalEncoder(64, base_channel, base_channel, device=device) # 64-> num_frame
+        self.temporal_encoder = TemporalEncoder(64, 2*base_channel, 2*base_channel, device=device) # 64-> num_frame
 
         self.recon_decoder = nn.Sequential(
-            SA_GC(base_channel, base_channel, A),
+            SA_GC(2*base_channel, base_channel, A),
             SA_GC(base_channel, base_channel, A),
             nn.Conv2d(base_channel, 3, 1),
         )
 
         self.cls_decoder =  nn.Sequential(
-            EncodingBlock(base_channel, base_channel, A),
-            EncodingBlock(base_channel, base_channel, A),
-            EncodingBlock(base_channel, base_channel, A),
+            EncodingBlock(2*base_channel, 2*base_channel, A),
+            # EncodingBlock(base_channel, base_channel, A),
+            # EncodingBlock(base_channel, base_channel, A),
             # EncodingBlock(base_channel, base_channel*2, A, stride=2),
             # EncodingBlock(base_channel*2, base_channel*2, A),
             # EncodingBlock(base_channel*2, base_channel*2, A),
@@ -176,7 +174,7 @@ class InfoGCN(nn.Module):
 
         self.classifier = nn.Sequential(
             nn.ReLU(),
-            nn.Linear(base_channel, num_class)
+            nn.Linear(2*base_channel, num_class)
         )
 
         # self.classifier = nn.Sequential(
@@ -214,9 +212,9 @@ class InfoGCN(nn.Module):
         x = self.to_joint_embedding(x)
         x = x + self.pos_embedding[:, :self.num_point]
 
-        x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
-        x = self.data_bn(x)
-        x = rearrange(x, 'n (m v c) t -> (n m t) v c', m=M, v=V)
+        # x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
+        # x = self.data_bn(x)
+        # x = rearrange(x, 'n (m v c) t -> (n m t) v c', m=M, v=V)
 
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
