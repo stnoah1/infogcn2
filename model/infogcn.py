@@ -199,7 +199,7 @@ class ODESolver(nn.Module):
         self.latent_dim = latent_dim
         self.device = device
         self.ode = ode_func
-        self.max_order = 4
+        self.max_order = 6
         self.prev_f = collections.deque(maxlen=self.max_order)
         self.prev_t = None
         self.coeff = _BASHFORTH_DIVISOR[self.max_order]
@@ -208,7 +208,7 @@ class ODESolver(nn.Module):
         # data : B C T V
         B, C, T, V = h.shape
 
-        dt = 4
+        dt = 1
         if training:
             zs = []
             for t in range(self.max_order):
@@ -218,7 +218,7 @@ class ODESolver(nn.Module):
                 self.prev_f.appendleft(f_t)
 
             for t in range(self.max_order-1, T-1):
-                z_t = zs[t]
+                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 0.8).expand_as(zs[0]), zs[t], h[:,:,t:t+1,:])
                 z_next = z_t + dt * sum(xi * yi for xi, yi in zip(self.prev_f, dt*self.coeff.to(h.device).to(h.dtype))).to(z_t.dtype)
                 zs.append(z_next)
                 f_t = self.ode(t, z_t)
