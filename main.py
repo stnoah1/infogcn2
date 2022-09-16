@@ -23,6 +23,7 @@ from args import get_parser
 from loss import LabelSmoothingCrossEntropy, masked_recon_loss
 from model.infogcn import InfoGCN
 from utils import AverageMeter, import_class
+from einops import rearrange
 
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
@@ -227,9 +228,12 @@ class Processor():
             y_hat, x_hat, kl_div = self.model(x, t, training=True)
             cls_loss = self.cls_loss(y_hat, y)
             if self.arg.dct:
-                x_hat_dct = dct.dct(x_hat)
-                x_gt_dct = dct.dct(x_gt)
-                recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask)
+                x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
+                x_gt_ = rearrange(x_gt, 'b c t v m -> b c v m t')
+                mask_ = rearrange(mask, 'b c t v m -> b c v m t')
+                x_hat_dct = dct.dct(x_hat_)
+                x_gt_dct = dct.dct(x_gt_)
+                recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
                 recon_aux_loss = self.recon_loss(x_hat, x_gt, mask).detach()
             else:
                 recon_loss = self.recon_loss(x_hat, x_gt, mask)
@@ -302,9 +306,12 @@ class Processor():
                     y_hat, x_hat, kl_div = self.model(x, t, training=False)
                     cls_loss = self.cls_loss(y_hat, y)
                     if self.arg.dct:
-                        x_hat_dct = dct.dct(x_hat)
-                        x_gt_dct = dct.dct(x_gt)
-                        recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask)
+                        x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
+                        x_gt_ = rearrange(x_gt, 'b c t v m -> b c v m t')
+                        mask_ = rearrange(mask, 'b c t v m -> b c v m t')
+                        x_hat_dct = dct.dct(x_hat_)
+                        x_gt_dct = dct.dct(x_gt_)
+                        recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
                         recon_aux_loss = self.recon_loss(x_hat, x_gt, mask).detach()
                     else:
                         recon_loss = self.recon_loss(x_hat, x_gt, mask)

@@ -229,7 +229,7 @@ class Attention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
-        self.register_buffer("mask", torch.ones(seq_len, seq_len).tril().rot90()
+        self.register_buffer("mask", torch.ones(seq_len, seq_len).tril()
                                      .view(1, 1, seq_len, seq_len))
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, dim),
@@ -245,9 +245,8 @@ class Attention(nn.Module):
         attn = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
         if self.use_mask:
-            attn = attn.masked_fill(self.mask[:,:,:T,:T] == 0, 0)
-        else:
-            attn = self.attend(attn)
+            attn = attn.masked_fill(self.mask[:,:,:T,:T] == 0, float("-inf"))
+        attn = self.attend(attn)
         attn = self.dropout(attn)
 
         out = torch.matmul(attn, v)
@@ -340,24 +339,10 @@ class TemporalEncoder(nn.Module):
     def __init__(self, seq_len, latent_dim, input_dim, device = torch.device("cpu")):
 
         super(TemporalEncoder, self).__init__()
-        self.transformer = ViT(seq_len, input_dim, latent_dim*2, latent_dim, depth=4, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4)
+        self.transformer = ViT(seq_len, input_dim, latent_dim*2, latent_dim, depth=1, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4)
 
         self.latent_dim = latent_dim
         self.device = device
-
-        self.hiddens_to_z0 = nn.Sequential(
-            nn.Conv2d(self.latent_dim, self.latent_dim, 1),
-            nn.ReLU(),
-            nn.Conv2d(self.latent_dim, self.latent_dim * 2, 1)
-        )
-        self.init_network_weights()
-
-    def init_network_weights(self, std = 0.1):
-        for m in self.hiddens_to_z0.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0, std=std)
-                nn.init.constant_(m.bias, val=0)
-
 
     def forward(self, data):
         # IMPORTANT: assumes that 'data' already has mask concatenated to it

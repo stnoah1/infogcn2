@@ -65,9 +65,9 @@ class ODEEulerSolver(nn.Module):
         if training:
             zs = [h[:,:,0:1,:]]
             for t in range(1, T):
-                z_t = torch.where((torch.rand(B,1,1,1).to(h.device) < 1.0).expand_as(zs[0]), zs[t-1], h[:,:,t-1:t,:])
+                z_t = zs[t-1]
                 z_prime = self.ode(t, z_t)
-                z_next = z_t + z_prime
+                z_next = torch.where((torch.rand(B,1,1,1).to(h.device) < 0.90).expand_as(zs[0]), z_t + z_prime, h[:,:,t:t+1,:])
                 zs.append(z_next)
         else:
             zs = [h[:,:,t:t+1,:] for t in range(t_obs)]
@@ -146,9 +146,9 @@ class InfoGCN(nn.Module):
         self.diffeq_solver = ODEEulerSolver(base_channel, ode_func, T=64)
 
         self.spatial_encoder = nn.Sequential(
-            SA_GC(base_channel, base_channel, A),
-            SA_GC(base_channel, base_channel, A),
             SA_GC(base_channel, 2*base_channel, A),
+            # SA_GC(base_channel, base_channel, A),
+            # SA_GC(base_channel, 2*base_channel, A),
             nn.Conv2d(2*base_channel, 2*base_channel, 1),
         )
 
@@ -156,7 +156,7 @@ class InfoGCN(nn.Module):
 
         self.recon_decoder = nn.Sequential(
             SA_GC(2*base_channel, base_channel, A),
-            SA_GC(base_channel, base_channel, A),
+            # SA_GC(base_channel, base_channel, A),
             nn.Conv2d(base_channel, 3, 1),
         )
 
