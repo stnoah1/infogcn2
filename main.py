@@ -4,6 +4,7 @@ from __future__ import print_function
 import os
 import time
 import glob
+import wandb
 import pickle
 import random
 import resource
@@ -87,6 +88,7 @@ class Processor():
                 vel=self.arg.use_vel,
                 random_rot=self.arg.random_rot,
                 sort=False,
+                obs=self.arg.obs
             ),
             batch_size=self.arg.batch_size,
             shuffle=True,
@@ -101,7 +103,8 @@ class Processor():
                 split='test',
                 window_size=self.arg.window_size,
                 p_interval=[0.95],
-                vel=self.arg.use_vel
+                vel=self.arg.use_vel,
+                obs=self.arg.obs
             ),
             batch_size=self.arg.test_batch_size,
             shuffle=False,
@@ -121,6 +124,7 @@ class Processor():
             k=self.arg.k,
             base_channel=self.arg.base_channel,
             device=self.device,
+            ratio=self.arg.pred_ratio,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = masked_recon_loss
@@ -145,7 +149,7 @@ class Processor():
                             self.print_log('Can Not Remove Weights: {}.'.format(key))
 
             try:
-                self.model.load_state_dict(weights)
+                self.model.load_state_dict(weights, strict=False)
             except:
                 state = self.model.state_dict()
                 diff = list(set(state.keys()).difference(set(weights.keys())))
@@ -223,22 +227,21 @@ class Processor():
             y = y.long().to(self.device)
             t = int(T*self.arg.obs)
             x_gt = x
-            mask = (abs(x) > 1e-5)
-
-            y_hat, x_hat, kl_div = self.model(x, t, training=True)
+            mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
+            y_hat, x_hat, kl_div = self.model(x, t, mask, training=True)
             cls_loss = self.cls_loss(y_hat, y)
             if self.arg.dct:
                 x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
                 x_gt_ = rearrange(x_gt, 'b c t v m -> b c v m t')
-                mask_ = rearrange(mask, 'b c t v m -> b c v m t')
+                mask_ = rearrange(mask.detach().clone(), 'b c t v m -> b c v m t')
+                mask_[:,:,:,:,8:] = 0.
                 x_hat_dct = dct.dct(x_hat_)
                 x_gt_dct = dct.dct(x_gt_)
                 recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
-                recon_aux_loss = self.recon_loss(x_hat, x_gt, mask).detach()
             else:
                 recon_loss = self.recon_loss(x_hat, x_gt, mask)
-                recon_aux_loss = torch.tensor(0.)
-            loss = recon_loss + self.arg.lambda_1 * cls_loss + self.arg.lambda_2 * kl_div
+            recon_eval = self.recon_loss(x_hat[:,:,t:], x_gt[:,:,t:], mask[:,:,t:])
+            loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss + kl_div
 
             # backward
             self.optimizer.zero_grad()
@@ -257,7 +260,7 @@ class Processor():
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
-            self.log_recon_2d_loss.update(recon_aux_loss.data.item(), B)
+            self.log_recon_2d_loss.update(recon_eval.data.item(), B)
 
             tbar.set_description(
                 f"[Epoch #{epoch}]"\
@@ -301,22 +304,22 @@ class Processor():
                     y = y.long().to(self.device)
                     t = int(T*self.arg.obs)
                     x_gt = x
-                    mask = (abs(x) > 1e-5)
+                    mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
 
-                    y_hat, x_hat, kl_div = self.model(x, t, training=False)
+                    y_hat, x_hat, kl_div = self.model(x, t, mask, training=False)
                     cls_loss = self.cls_loss(y_hat, y)
                     if self.arg.dct:
                         x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
                         x_gt_ = rearrange(x_gt, 'b c t v m -> b c v m t')
-                        mask_ = rearrange(mask, 'b c t v m -> b c v m t')
+                        mask_ = rearrange(mask.detach().clone(), 'b c t v m -> b c v m t')
+                        mask_[:,:,:,:,16:] = 0.
                         x_hat_dct = dct.dct(x_hat_)
                         x_gt_dct = dct.dct(x_gt_)
                         recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
-                        recon_aux_loss = self.recon_loss(x_hat, x_gt, mask).detach()
                     else:
                         recon_loss = self.recon_loss(x_hat, x_gt, mask)
-                        recon_aux_loss = torch.tensor(0.)
-                    loss = recon_loss + self.arg.lambda_1 * cls_loss + self.arg.lambda_2 * kl_div
+                    recon_eval = self.recon_loss(x_hat[:,:,t:], x_gt[:,:,t:], mask[:,:,t:])
+                    loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
                     cls_loss_value.append(cls_loss.data.item())
@@ -328,7 +331,7 @@ class Processor():
                 self.log_acc.update((predict_label == y.data).float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
-                self.log_recon_2d_loss.update(recon_aux_loss.data.item(), B)
+                self.log_recon_2d_loss.update(recon_eval.data.item(), B)
                 self.log_kl_div.update(kl_div.data.item(), B)
 
                 tbar.set_description(
@@ -420,6 +423,7 @@ class Processor():
 
 def main():
     # parser arguments
+    wandb.init()
     parser = get_parser()
     arg = parser.parse_args()
     arg.work_dir = f"results/{arg.dataset}_{arg.datacase}"

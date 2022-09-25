@@ -24,6 +24,7 @@ def get_parser():
     parser.add_argument('--dataset', default='ntu', help='data loader will be used')
     parser.add_argument('--datacase', default='CS', help='data loader will be used')
     parser.add_argument('--use_vel', type=str2bool, default=False, help='')
+    parser.add_argument('--pred_input', type=str2bool, default=False, help='')
 
 
     # processor
@@ -55,6 +56,7 @@ def get_parser():
     parser.add_argument('--z_prior_gain', type=int, default=3, help='')
     parser.add_argument('--graph', type=str, default='graph.ntu_rgb_d.Graph', help='')
     parser.add_argument('--dct', type=str2bool, default=False, help='')
+    parser.add_argument('--pred_ratio', type=float, default=0.5, help='')
 
     # optim
     parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
