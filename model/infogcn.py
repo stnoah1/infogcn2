@@ -9,10 +9,12 @@ from torch import nn
 from einops import rearrange
 
 from model.modules import EncodingBlock, SA_GC, TemporalEncoder
-from model.utils import bn_init, sample_standard_gaussian, import_class
+from model.utils import bn_init, import_class
 from model.encoder_decoder import Encoder_z0_RNN
 
 from einops import rearrange
+from torchdiffeq import odeint as odeint
+
 
 from torch.distributions.normal import Normal
 from torch.distributions import kl_divergence
@@ -20,12 +22,10 @@ from torchdiffeq import odeint as odeint
 
 
 class DiffeqSolver(nn.Module):
-    def __init__(self, ode_func, method, odeint_rtol=1e-4,
-                 odeint_atol=1e-5, device=torch.device("cpu")):
+    def __init__(self, ode_func, method, odeint_rtol=1e-4, odeint_atol=1e-5)
         super(DiffeqSolver, self).__init__()
 
         self.ode_method = method
-        self.device = device
         self.ode_func = ode_func
 
         self.odeint_rtol = odeint_rtol
@@ -44,42 +44,6 @@ class DiffeqSolver(nn.Module):
         # b c t v
         return pred_y
 
-class ODEEulerSolver(nn.Module):
-    def __init__(self, latent_dim, ode_func, T, ratio=0.9, device = torch.device("cpu")):
-
-        super(ODEEulerSolver, self).__init__()
-
-        self.latent_dim = latent_dim
-        self.device = device
-        self.ode = ode_func
-        self.ratio = ratio
-
-    def forward(self, h, t_obs, run_backwards=False, training=True):
-        # data : B C T V
-        B, C, T, V = h.shape
-
-        time_set = list(range(T))
-
-        if run_backwards:
-            time_set = time_set[::-1]
-
-        if training:
-            zs = [h[:,:,t:t+1,:] for t in range(t_obs)]
-            for t in range(t_obs, T):
-                z_t = zs[t-1]
-                z_prime = self.ode(t, z_t)
-                z_next = torch.where((torch.rand(B,1,1,1).to(h.device) < self.ratio).expand_as(zs[0]), z_t + z_prime, h[:,:,t:t+1,:])
-                zs.append(z_next)
-        else:
-            zs = [h[:,:,t:t+1,:] for t in range(t_obs)]
-            for t in range(t_obs, T):
-                z_t = zs[t-1]
-                z_prime = self.ode(t, z_t)
-                z_next = z_t + z_prime
-                zs.append(z_next)
-
-        z_hat = torch.cat(zs, dim=2)
-        return z_hat
 
 class ODEFunc(nn.Module):
     def __init__(self, dim, A, T=64):
@@ -145,7 +109,7 @@ class InfoGCN(nn.Module):
         ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
         self.temporal_encoder = TemporalEncoder(64, base_channel, base_channel, device=device)
 
-        self.diffeq_solver = ODEEulerSolver(base_channel, ode_func, T=64, ratio=ratio)
+        self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
 
         self.spatial_encoder = nn.Sequential(
             SA_GC(base_channel, base_channel, A),
@@ -200,15 +164,36 @@ class InfoGCN(nn.Module):
         loss = kldiv_z0.mean()
         return loss
 
+    def extrapolate(self, z, t):
+        '''
+        z : n c t v m
+        '''
+        if self.training:
+            z_hat = []
+            for i in range(self.obs):
+                z_i = self.diffeq_solver(z[:, :, i:i+1, :, :], t[:2])
+                z_hat = z_hat.append(z_i[-1])
+            z_hat = torch.cat(z_hat, dim=0)
+            # AR pred
+            z_0 = z[:, :, self.obs-1:self.obs, :, :]
+        else:
+            z_hat = z[:, :, :self.obs, :, :]
+
+        z_0 = z[:, :, self.obs-1:self.obs, :, :]
+        z_pred = self.diffeq_solver(z_0, t[:self.obs+1])
+        z_hat = torch.cat((z_hat, z_pred), dim=0)
+
+        return z_hat
+
     def get_A(self, k):
         A_outward = self.Graph.A_outward_binary
         I = np.eye(self.Graph.num_node)
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
-    def forward(self, x, t, mask, training=True):
+    def forward(self, x, t, mask):
         N, C, T, V, M = x.size()
         z = self.encode(x, t)
-        z = self.diffeq_solver(z, t, training=training)
+        z = self.extrapolate(z, t)
         mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
         z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,64,1,25).expand_as(z).to(z.dtype))
         x_hat = self.reconstruct(z, N)
