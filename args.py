@@ -24,7 +24,7 @@ def get_parser():
     parser.add_argument('--dataset', default='ntu', help='data loader will be used')
     parser.add_argument('--datacase', default='CS', help='data loader will be used')
     parser.add_argument('--use_vel', type=str2bool, default=False, help='')
-    parser.add_argument('--pred_input', type=str2bool, default=False, help='')
+    parser.add_argument('--dct_order', type=int, default=64, help='')
 
 
     # processor

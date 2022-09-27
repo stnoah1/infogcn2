@@ -9,7 +9,7 @@ from feeders import tools
 class Feeder(Dataset):
     def __init__(self, data_path, label_path=None, p_interval=1, split='train', repeat=1, random_choose=False, random_shift=False,
                  random_move=False, random_rot=False, window_size=-1, normalization=False, debug=False, use_mmap=False,
-                 vel=False, sort=False, obs=1.0, pred_input=False):
+                 vel=False, sort=False, obs=1.0):
         """
         :param data_path:
         :param label_path:
@@ -39,7 +39,6 @@ class Feeder(Dataset):
         self.p_interval = p_interval
         self.random_rot = random_rot
         self.vel = vel
-        self.pred_input = pred_input
         self.load_data()
         self.obs = obs
         print("obs: ",self.obs)
@@ -59,13 +58,9 @@ class Feeder(Dataset):
             N, T, _ = self.data.shape
             self.data = self.data.reshape((N, T, 2, 25, 3)).transpose(0, 4, 1, 3, 2)
         elif self.split == 'test':
-            if self.pred_input:
-                with open("results/0.5/x_hat_list_eval_64_1198_True.pkl", 'rb') as fp:
-                    self.data = pickle.load(fp)
-            else:
-                self.data = npz_data['x_test']
-                N, T, _ = self.data.shape
-                self.data = self.data.reshape((N, T, 2, 25, 3)).transpose(0, 4, 1, 3, 2)
+            self.data = npz_data['x_test']
+            N, T, _ = self.data.shape
+            self.data = self.data.reshape((N, T, 2, 25, 3)).transpose(0, 4, 1, 3, 2)
             self.label = np.argmax(npz_data['y_test'], axis=-1)
             self.sample_name = ['test_' + str(i) for i in range(len(self.data))]
         else:

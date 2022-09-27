@@ -63,13 +63,6 @@ class ODEEulerSolver(nn.Module):
         if run_backwards:
             time_set = time_set[::-1]
 
-        # if training:
-            # zs = [h[:,:,0:1,:]]
-            # for t in range(1, T):
-                # z_t = zs[t-1]
-                # z_prime = self.ode(t, z_t)
-                # z_next = torch.where((torch.rand(B,1,1,1).to(h.device) < self.ratio).expand_as(zs[0]), z_t + z_prime, h[:,:,t:t+1,:])
-                # zs.append(z_next)
         if training:
             zs = [h[:,:,t:t+1,:] for t in range(t_obs)]
             for t in range(t_obs, T):
@@ -161,33 +154,35 @@ class InfoGCN(nn.Module):
             nn.Conv2d(base_channel, base_channel, 1),
         )
 
-        self.recon_decoder = nn.Sequential(
+        self.spatial_encoder2 = nn.Sequential(
             SA_GC(base_channel, base_channel, A),
             # SA_GC(base_channel, base_channel, A),
+            # SA_GC(base_channel, 2*base_channel, A),
+            nn.Conv2d(base_channel, base_channel, 1),
+        )
+
+        self.recon_decoder = nn.Sequential(
+            SA_GC(base_channel, 2*base_channel, A),
+            SA_GC(2*base_channel, base_channel, A),
             nn.Conv2d(base_channel, 3, 1),
         )
 
         self.cls_decoder =  nn.Sequential(
             EncodingBlock(base_channel, base_channel, A),
-            # EncodingBlock(base_channel, base_channel, A),
-            # EncodingBlock(base_channel, base_channel, A),
+            EncodingBlock(base_channel, base_channel, A),
+            EncodingBlock(base_channel, base_channel, A),
             EncodingBlock(base_channel, base_channel*2, A, stride=2),
-            # EncodingBlock(base_channel*2, base_channel*2, A),
-            # EncodingBlock(base_channel*2, base_channel*2, A),
+            EncodingBlock(base_channel*2, base_channel*2, A),
+            EncodingBlock(base_channel*2, base_channel*2, A),
             EncodingBlock(base_channel*2, base_channel*4, A, stride=2),
-            # EncodingBlock(base_channel*4, base_channel*4, A),
-            # EncodingBlock(base_channel*4, base_channel*4, A),
+            EncodingBlock(base_channel*4, base_channel*4, A),
+            EncodingBlock(base_channel*4, base_channel*4, A),
         )
 
         self.classifier = nn.Sequential(
             nn.ReLU(),
             nn.Linear(4*base_channel, num_class)
         )
-
-        # self.classifier = nn.Sequential(
-            # nn.ReLU(),
-            # nn.Linear(base_channel*4, num_class)
-        # )
 
         self.zero_embed = nn.Parameter(torch.randn(base_channel, 25))
 
@@ -211,69 +206,68 @@ class InfoGCN(nn.Module):
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
     def forward(self, x, t, mask, training=True):
-
-        # dct
         N, C, T, V, M = x.size()
-        x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
-        x = self.A_vector.to(x.device).to(x.dtype).expand(N*M*T, -1, -1) @ x
-
-        # embedding
-        x = self.to_joint_embedding(x)
-        x = x + self.pos_embedding[:, :self.num_point]
-
-        # x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
-        # x = self.data_bn(x)
-        # x = rearrange(x, 'n (m v c) t -> (n m t) v c', m=M, v=V)
-
-        # encoding
-        x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
-        z = self.spatial_encoder(x)
-        # x, _ = self.temporal_encoder(x)
+        z = self.encode(x, t)
         z = self.diffeq_solver(z, t, training=training)
         mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
         z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,64,1,25).expand_as(z).to(z.dtype))
+        x_hat = self.reconstruct(z, N)
+        y = self.classify(z, N, M) #if reconstruction_only else torch.zeros(N,60).to(x.device).to(x.dtype)
         kl_div = torch.tensor(0.0)
-
-        # cls_decoding
-        # TODO: match the dimmension
-        y = self.cls_decoder(z)
-        y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
-        y = self.classifier(y)
-
-        # recon_decoding
-        x_hat = self.recon_decoder(z)
-        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', n=N, m=M)
         return y, x_hat, kl_div
 
     def finetune(self, x, t, mask, training=True):
-        # dct
+        with torch.no_grad():
+            N, C, T, V, M = x.size()
+            z = self.encode(x, t)
+            z = self.diffeq_solver(z, t, training=False)
+            mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
+            z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,64,1,25).expand_as(z).to(z.dtype))
+            x_recon = self.reconstruct(z, N)
+        z = self.encode2(x_recon, t)
+        y = self.classify(z, N, M)
+        kl_div = torch.tensor(0.0)
+        return y, x_recon, kl_div
+
+    def encode(self, x, t):
         N, C, T, V, M = x.size()
         x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
         x = self.A_vector.to(x.device).to(x.dtype).expand(N*M*T, -1, -1) @ x
+
         # embedding
         x = self.to_joint_embedding(x)
         x = x + self.pos_embedding[:, :self.num_point]
 
-        # x = rearrange(x, '(n m t) v c -> n (m v c) t', m=M, n=N)
-        # x = self.data_bn(x)
-        # x = rearrange(x, 'n (m v c) t -> (n m t) v c', m=M, v=V)
-
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
         z = self.spatial_encoder(x)
-        # x, _ = self.temporal_encoder(x)
-        kl_div = torch.tensor(0.0)
+        return z
 
-        # with torch.no_grad():
-        z = self.diffeq_solver(z, t, training=False)
+    def encode2(self, x, t):
+        with torch.no_grad():
+            N, C, T, V, M = x.size()
+            x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
+            x = self.A_vector.to(x.device).to(x.dtype).expand(N*M*T, -1, -1) @ x
 
-        # cls_decoding
-        # TODO: match the dimmension
+            # embedding
+            x = self.to_joint_embedding(x)
+            x = x + self.pos_embedding[:, :self.num_point]
+
+            # encoding
+            x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
+        z = self.spatial_encoder2(x)
+        return z
+
+    def reconstruct(self, z, N):
+        _, C, T, V = z.size()
+        x_hat = self.recon_decoder(z)
+        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', n=N)
+        return x_hat
+
+    def classify(self, z, N, M):
+        _, C, T, V = z.size()
         y = self.cls_decoder(z)
         y = y.view(N, M, y.size(1), -1).mean(3).mean(1)
         y = self.classifier(y)
+        return y
 
-        x_hat = self.recon_decoder(z)
-        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', n=N, m=M)
-        # recon_decoding
-        return y, x_hat, kl_div

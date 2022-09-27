@@ -217,7 +217,7 @@ class Processor():
         self.log_recon_loss.reset()
         self.log_recon_2d_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
-        self.adjust_learning_rate(epoch)
+        lr = self.adjust_learning_rate(epoch)
 
         tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
@@ -234,7 +234,7 @@ class Processor():
                 x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
                 x_gt_ = rearrange(x_gt, 'b c t v m -> b c v m t')
                 mask_ = rearrange(mask.detach().clone(), 'b c t v m -> b c v m t')
-                mask_[:,:,:,:,8:] = 0.
+                mask_[:,:,:,:,self.arg.dct_order:] = 0.
                 x_hat_dct = dct.dct(x_hat_)
                 x_gt_dct = dct.dct(x_gt_)
                 recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
@@ -270,7 +270,12 @@ class Processor():
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 f"RECON2D:{self.log_recon_2d_loss.avg:.5f}, " \
             )
-
+        wandb.log({
+            "train/Recon2D_loss":self.log_recon_2d_loss.avg,
+            "train/lr":lr,
+            "train/cls_loss":self.log_cls_loss.avg,
+            "train/ACC":self.log_acc.avg,
+        })
         with open(f"results/{self.arg.obs}/x_hat_list_train_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
             pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
         # statistics of time consumption and loss
@@ -312,7 +317,7 @@ class Processor():
                         x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
                         x_gt_ = rearrange(x_gt, 'b c t v m -> b c v m t')
                         mask_ = rearrange(mask.detach().clone(), 'b c t v m -> b c v m t')
-                        mask_[:,:,:,:,16:] = 0.
+                        mask_[:,:,:,:,self.arg.dct_order:] = 0.
                         x_hat_dct = dct.dct(x_hat_)
                         x_gt_dct = dct.dct(x_gt_)
                         recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
@@ -343,6 +348,11 @@ class Processor():
                     f"RECON2D:{self.log_recon_2d_loss.avg:.5f}, " \
                 )
 
+            wandb.log({
+                "eval/Recon2D_loss":self.log_recon_2d_loss.avg,
+                "eval/cls_loss":self.log_cls_loss.avg,
+                "eval/ACC":self.log_acc.avg,
+            })
             with open(f"results/{self.arg.obs}/x_hat_list_eval_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
                 pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
 
@@ -384,7 +394,7 @@ class Processor():
                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
             self.print_log(f'# Parameters: {count_parameters(self.model)/10**6:.3f}M')
             for epoch in range(self.arg.start_epoch, self.arg.num_epoch):
-                save_model = (epoch + 1 == self.arg.num_epoch) and (epoch + 1 > self.arg.save_epoch)
+                save_model = (epoch + 1 > self.arg.save_epoch)
 
                 self.train(epoch, save_model=save_model)
 
@@ -426,7 +436,7 @@ def main():
     wandb.init()
     parser = get_parser()
     arg = parser.parse_args()
-    arg.work_dir = f"results/{arg.dataset}_{arg.datacase}"
+    arg.work_dir = wandb.run.dir
     init_seed(arg.seed)
     # execute process
     processor = Processor(arg)
