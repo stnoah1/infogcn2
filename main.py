@@ -125,6 +125,8 @@ class Processor():
             base_channel=self.arg.base_channel,
             device=self.device,
             ratio=self.arg.pred_ratio,
+            T=64,
+            obs=0.5
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = masked_recon_loss
@@ -228,7 +230,7 @@ class Processor():
             t = int(T*self.arg.obs)
             x_gt = x
             mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
-            y_hat, x_hat, kl_div = self.model(x, t, mask, training=True)
+            y_hat, x_hat, kl_div = self.model(x, t, mask)
             cls_loss = self.cls_loss(y_hat, y)
             if self.arg.dct:
                 x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
@@ -311,7 +313,7 @@ class Processor():
                     x_gt = x
                     mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
 
-                    y_hat, x_hat, kl_div = self.model(x, t, mask, training=False)
+                    y_hat, x_hat, kl_div = self.model(x, t, mask)
                     cls_loss = self.cls_loss(y_hat, y)
                     if self.arg.dct:
                         x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')

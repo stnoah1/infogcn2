@@ -22,7 +22,7 @@ from torchdiffeq import odeint as odeint
 
 
 class DiffeqSolver(nn.Module):
-    def __init__(self, ode_func, method, odeint_rtol=1e-4, odeint_atol=1e-5)
+    def __init__(self, ode_func, method, odeint_rtol=1e-4, odeint_atol=1e-5):
         super(DiffeqSolver, self).__init__()
 
         self.ode_method = method
@@ -61,8 +61,8 @@ class ODEFunc(nn.Module):
 
     def forward(self, t, x, backwards=False):
         # TODO:refactroing
-        # t = int(t.item())
-        x = x + self.temporal_pe[:,:,t:t+1]
+        t = int(t.item())
+        x = x + self.temporal_pe[:,:,t:t+1,:]
         x = torch.einsum('vu,nctu->nctv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
         x = self.tanh(x)
@@ -91,13 +91,15 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, device='cuda',
-                 dct=True, ratio=0.9):
+                 dct=True, ratio=0.9, T=64, obs=0.5):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
         self.Graph = import_class(graph)()
         A = np.stack([self.Graph.A_norm] * num_head, axis=0)
         self.dct = dct
+        self.T = T
+        self.obs = obs
 
         self.num_class = num_class
         self.num_point = num_point
@@ -164,24 +166,24 @@ class InfoGCN(nn.Module):
         loss = kldiv_z0.mean()
         return loss
 
-    def extrapolate(self, z, t):
+    def extrapolate(self, z):
         '''
-        z : n c t v m
+        z : (n m) c t v
         '''
+        obs_range = int(self.T * self.obs)
+        t = torch.linspace(0, self.T, self.T+1).to(z.device)
         if self.training:
             z_hat = []
-            for i in range(self.obs):
-                z_i = self.diffeq_solver(z[:, :, i:i+1, :, :], t[:2])
-                z_hat = z_hat.append(z_i[-1])
-            z_hat = torch.cat(z_hat, dim=0)
-            # AR pred
-            z_0 = z[:, :, self.obs-1:self.obs, :, :]
+            for i in range(obs_range):
+                z_i = self.diffeq_solver(z[:, :, i:i+1, :], t[:2])
+                z_hat.append(z_i[:,:,-1:,:])
+            z_hat = torch.cat(z_hat, dim=2)
         else:
-            z_hat = z[:, :, :self.obs, :, :]
+            z_hat = z[:, :, :obs_range, :]
 
-        z_0 = z[:, :, self.obs-1:self.obs, :, :]
-        z_pred = self.diffeq_solver(z_0, t[:self.obs+1])
-        z_hat = torch.cat((z_hat, z_pred), dim=0)
+        z_0 = z[:, :, obs_range-1:obs_range, :]
+        z_pred = self.diffeq_solver(z_0, t[:self.T-obs_range+1])
+        z_hat = torch.cat((z_hat, z_pred[:,:,1:,:]), dim=2)
 
         return z_hat
 
@@ -193,7 +195,7 @@ class InfoGCN(nn.Module):
     def forward(self, x, t, mask):
         N, C, T, V, M = x.size()
         z = self.encode(x, t)
-        z = self.extrapolate(z, t)
+        z = self.extrapolate(z)
         mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
         z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,64,1,25).expand_as(z).to(z.dtype))
         x_hat = self.reconstruct(z, N)
