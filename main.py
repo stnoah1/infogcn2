@@ -59,7 +59,7 @@ class Processor():
         self.log_recon_loss = AverageMeter()
         self.log_recon_2d_loss = AverageMeter()
         self.log_cls_loss = AverageMeter()
-        self.log_acc = AverageMeter()
+        self.log_acc = [AverageMeter() for _ in range(6)]
         self.log_kl_div = AverageMeter()
 
 
@@ -213,7 +213,7 @@ class Processor():
 
     def train(self, epoch, save_model=False):
         self.model.train()
-        self.log_acc.reset()
+        [self.log_acc[i].reset() for i in range(6)]
         self.log_cls_loss.reset()
         self.log_kl_div.reset()
         self.log_recon_loss.reset()
@@ -231,6 +231,8 @@ class Processor():
             x_gt = x
             mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
             y_hat, x_hat, kl_div = self.model(x, t, mask)
+            y_hat = rearrange(y_hat, "n i t -> (n t) i")
+            y = y.unsqueeze(-1).expand(B, T).reshape(-1)
             cls_loss = self.cls_loss(y_hat, y)
             if self.arg.dct:
                 x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
@@ -257,16 +259,17 @@ class Processor():
             self.optimizer.step()
 
             value, predict_label = torch.max(y_hat.data, 1)
-
-            self.log_acc.update((predict_label == y.data).float().mean(), B)
+            for i, ratio in enumerate([0.1, 0.2, 0.3, 0.4, 0.5, 1.0]):
+                self.log_acc[i].update((predict_label == y.data)\
+                                        .view(B,T)[:,int(T*ratio)-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
             self.log_recon_2d_loss.update(recon_eval.data.item(), B)
 
             tbar.set_description(
-                f"[Epoch #{epoch}]"\
-                f"ACC:{self.log_acc.avg:.3f}, " \
+                f"[Epoch #{epoch}] "\
+                f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
                 f"KL:{self.log_kl_div.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
@@ -274,9 +277,13 @@ class Processor():
             )
         wandb.log({
             "train/Recon2D_loss":self.log_recon_2d_loss.avg,
-            "train/lr":lr,
             "train/cls_loss":self.log_cls_loss.avg,
-            "train/ACC":self.log_acc.avg,
+            "train/ACC_0.1":self.log_acc[0].avg,
+            "train/ACC_0.2":self.log_acc[1].avg,
+            "train/ACC_0.3":self.log_acc[2].avg,
+            "train/ACC_0.4":self.log_acc[3].avg,
+            "train/ACC_0.5":self.log_acc[4].avg,
+            "train/ACC_1.0":self.log_acc[5].avg,
         })
         with open(f"results/{self.arg.obs}/x_hat_list_train_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
             pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
@@ -289,7 +296,7 @@ class Processor():
 
     def eval(self, epoch, save_score=False, loader_name=['test']):
         self.model.eval()
-        self.log_acc.reset()
+        [self.log_acc[i].reset() for i in range(6)]
         self.log_cls_loss.reset()
         self.log_kl_div.reset()
         self.log_recon_loss.reset()
@@ -314,6 +321,8 @@ class Processor():
                     mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
 
                     y_hat, x_hat, kl_div = self.model(x, t, mask)
+                    y_hat = rearrange(y_hat, "n i t -> (n t) i")
+                    y = y.unsqueeze(-1).expand(B, T).reshape(-1)
                     cls_loss = self.cls_loss(y_hat, y)
                     if self.arg.dct:
                         x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
@@ -332,10 +341,11 @@ class Processor():
                     cls_loss_value.append(cls_loss.data.item())
 
                     _, predict_label = torch.max(y_hat.data, 1)
-                    pred_list.append(predict_label.data.cpu().numpy())
+                    pred_list.append(predict_label.view(B,T)[:,t].data.cpu().numpy())
                     step += 1
-
-                self.log_acc.update((predict_label == y.data).float().mean(), B)
+                for i, ratio in enumerate([0.1, 0.2, 0.3, 0.4, 0.5, 1.0]):
+                    self.log_acc[i].update((predict_label == y.data)\
+                                           .view(B,T)[:,int(T*ratio)-1].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
                 self.log_recon_2d_loss.update(recon_eval.data.item(), B)
@@ -343,7 +353,7 @@ class Processor():
 
                 tbar.set_description(
                     f"[Epoch #{epoch}] "\
-                    f"ACC:{self.log_acc.avg:.3f}, " \
+                    f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
                     f"CLS:{self.log_cls_loss.avg:.3f}, " \
                     f"KL:{self.log_kl_div.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
@@ -353,7 +363,12 @@ class Processor():
             wandb.log({
                 "eval/Recon2D_loss":self.log_recon_2d_loss.avg,
                 "eval/cls_loss":self.log_cls_loss.avg,
-                "eval/ACC":self.log_acc.avg,
+                "eval/ACC_0.1":self.log_acc[0].avg,
+                "eval/ACC_0.2":self.log_acc[1].avg,
+                "eval/ACC_0.3":self.log_acc[2].avg,
+                "eval/ACC_0.4":self.log_acc[3].avg,
+                "eval/ACC_0.5":self.log_acc[4].avg,
+                "eval/ACC_1.0":self.log_acc[5].avg,
             })
             with open(f"results/{self.arg.obs}/x_hat_list_eval_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
                 pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)

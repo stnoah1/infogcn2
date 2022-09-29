@@ -339,7 +339,7 @@ class TemporalEncoder(nn.Module):
     def __init__(self, seq_len, latent_dim, input_dim, device = torch.device("cpu")):
 
         super(TemporalEncoder, self).__init__()
-        self.transformer = ViT(seq_len, input_dim, latent_dim*2, latent_dim, depth=1, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4)
+        self.transformer = ViT(seq_len, input_dim, latent_dim, latent_dim, depth=1, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4)
 
         self.latent_dim = latent_dim
         self.device = device
@@ -351,5 +351,4 @@ class TemporalEncoder(nn.Module):
         output = self.transformer(data)
 
         # why unsqueezed?
-        return output[:, :self.latent_dim, ...], output[:, self.latent_dim:, ...].abs()
-
+        return output[:, :self.latent_dim, ...]#, output[:, self.latent_dim:, ...].abs()
