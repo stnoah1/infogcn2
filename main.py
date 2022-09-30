@@ -224,11 +224,11 @@ class Processor():
         tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
         for x, y, index in tbar:
-            B, _, T, _, _ = x.shape
+            B, C, T, V, M = x.shape
             x = x.float().to(self.device)
             y = y.long().to(self.device)
             t = int(T*self.arg.obs)
-            x_gt = x
+            x_gt = x.unsqueeze(0).expand(2, B, C, T, V, M).reshape(2*B, C, T, V, M)
             mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
             y_hat, x_hat, kl_div = self.model(x, t, mask)
             y_hat = rearrange(y_hat, "n i t -> (n t) i")
@@ -243,6 +243,7 @@ class Processor():
                 x_gt_dct = dct.dct(x_gt_)
                 recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
             else:
+                mask = mask.unsqueeze(0).expand(2, B, C, T, V, M).reshape(2*B, C, T, V, M)
                 recon_loss = self.recon_loss(x_hat, x_gt, mask)
             recon_eval = self.recon_loss(x_hat[:,:,t:], x_gt[:,:,t:], mask[:,:,t:])
             loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss + kl_div

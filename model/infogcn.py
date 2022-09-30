@@ -109,7 +109,7 @@ class InfoGCN(nn.Module):
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
         self.data_bn = nn.BatchNorm1d(num_person * base_channel * num_point)
         bn_init(self.data_bn, 1)
-        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
+        ode_func = ODEFunc(2*base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
         self.temporal_encoder = TemporalEncoder(64, 2*base_channel, 2*base_channel, device=device)
 
         self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
@@ -148,6 +148,9 @@ class InfoGCN(nn.Module):
         # )
 
         self.classifier = nn.Sequential(
+            # nn.Conv1d(2*base_channel, 2*base_channel, 1),
+            # nn.ReLU(),
+            # nn.Conv1d(2*base_channel, base_channel, 1),
             nn.ReLU(),
             nn.Conv1d(2*base_channel, num_class, 1)
         )
@@ -172,21 +175,14 @@ class InfoGCN(nn.Module):
         '''
         z : (n m) c t v
         '''
-        obs_range = int(self.T * self.obs)
         t = torch.linspace(0, self.T, self.T+1).to(z.device)
+        zs = [z[:,:,:1,:]]
         if self.training:
-            z_hat = []
-            for i in range(obs_range):
-                z_i = self.diffeq_solver(z[:, :, i:i+1, :], t[:2])
-                z_hat.append(z_i[:,:,-1:,:])
-            z_hat = torch.cat(z_hat, dim=2)
+            for i in range(self.T-1):
+                zs.append(self.diffeq_solver(z[:,:,i:i+1,:], t[:2])[:,:,1:,:])
+            z_hat = torch.cat(zs, dim=2)
         else:
-            z_hat = z[:, :, :obs_range, :]
-
-        z_0 = z[:, :, obs_range-1:obs_range, :]
-        z_pred = self.diffeq_solver(z_0, t[:self.T-obs_range+1])
-        z_hat = torch.cat((z_hat, z_pred[:,:,1:,:]), dim=2)
-
+            z_hat = z
         return z_hat
 
     def get_A(self, k):
@@ -198,11 +194,15 @@ class InfoGCN(nn.Module):
         N, C, T, V, M = x.size()
         z = self.encode(x, t)
         z = self.temporal_encoder(z)
-        # z = self.extrapolate(z)
+        if self.training:
+            z_pred = self.extrapolate(z)
+            z_cat = torch.cat([z,z_pred],axis=0)
+        else:
+            z_cat = z
         # mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
         # z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,z.size(1),1,V).expand_as(z).to(z.dtype))
-        x_hat = self.reconstruct(z)
-        y = self.classify(z, N, M) #if reconstruction_only else torch.zeros(N,60).to(x.device).to(x.dtype)
+        x_hat = self.reconstruct(z_cat)
+        y = self.classify(z) #if reconstruction_only else torch.zeros(N,60).to(x.device).to(x.dtype)
         kl_div = torch.tensor(0.0)
         return y, x_hat, kl_div
 
@@ -215,7 +215,7 @@ class InfoGCN(nn.Module):
             z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,64,1,25).expand_as(z).to(z.dtype))
             x_recon = self.reconstruct(z, N)
         z = self.encode2(x_recon, t)
-        y = self.classify(z, N, M)
+        y = self.classify(z)
         kl_div = torch.tensor(0.0)
         return y, x_recon, kl_div
 
@@ -254,9 +254,9 @@ class InfoGCN(nn.Module):
         x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=self.num_person)
         return x_hat
 
-    def classify(self, z, N, M):
-        _, C, T, V = z.size()
+    def classify(self, z):
+        N, C, T, V = z.size()
         # y = self.cls_decoder(z) # n c t v m
-        z = z.view(N, self.num_person, C, T, V).mean(-1).mean(1)
-        y = self.classifier(z).view(N, self.num_class, T)
+        z = z.view(N//self.num_person, self.num_person, C, T, V).mean(-1).mean(1)
+        y = self.classifier(z).view(N//self.num_person, self.num_class, T)
         return y
