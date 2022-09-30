@@ -232,7 +232,7 @@ class Processor():
             mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
             y_hat, x_hat, kl_div = self.model(x, t, mask)
             y_hat = rearrange(y_hat, "n i t -> (n t) i")
-            y = y.unsqueeze(-1).expand(B, T).reshape(-1)
+            y = y.unsqueeze(0).unsqueeze(-1).expand(2, B, T).reshape(-1)
             cls_loss = self.cls_loss(y_hat, y)
             if self.arg.dct:
                 x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
@@ -262,7 +262,7 @@ class Processor():
             value, predict_label = torch.max(y_hat.data, 1)
             for i, ratio in enumerate([0.1, 0.2, 0.3, 0.4, 0.5, 1.0]):
                 self.log_acc[i].update((predict_label == y.data)\
-                                        .view(B,T)[:,int(T*ratio)-1].float().mean(), B)
+                                        .view(2*B,T)[:,int(T*ratio)-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)

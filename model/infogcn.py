@@ -116,7 +116,9 @@ class InfoGCN(nn.Module):
 
         self.spatial_encoder = nn.Sequential(
             SA_GC(base_channel, 2*base_channel, A),
-            SA_GC(2*base_channel, 2*base_channel, A),
+            SA_GC(2*base_channel, 3*base_channel, A),
+            SA_GC(3*base_channel, 3*base_channel, A),
+            SA_GC(3*base_channel, 2*base_channel, A),
             SA_GC(2*base_channel, 2*base_channel, A),
             nn.Conv2d(2*base_channel, 2*base_channel, 1),
         )
@@ -202,7 +204,7 @@ class InfoGCN(nn.Module):
         # mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
         # z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,z.size(1),1,V).expand_as(z).to(z.dtype))
         x_hat = self.reconstruct(z_cat)
-        y = self.classify(z) #if reconstruction_only else torch.zeros(N,60).to(x.device).to(x.dtype)
+        y = self.classify(z_cat) #if reconstruction_only else torch.zeros(N,60).to(x.device).to(x.dtype)
         kl_div = torch.tensor(0.0)
         return y, x_hat, kl_div
 
