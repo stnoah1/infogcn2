@@ -107,7 +107,7 @@ class InfoGCN(nn.Module):
         self.A_vector = self.get_A(k)
         self.to_joint_embedding = nn.Linear(in_channels, base_channel)
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
-        self.data_bn = nn.BatchNorm1d(num_person * base_channel * num_point)
+        self.data_bn = nn.BatchNorm1d(base_channel)
         bn_init(self.data_bn, 1)
         ode_func = ODEFunc(2*base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
         self.temporal_encoder = TemporalEncoder(64, 2*base_channel, 2*base_channel, device=device)
@@ -229,6 +229,11 @@ class InfoGCN(nn.Module):
         # embedding
         x = self.to_joint_embedding(x)
         x = x + self.pos_embedding[:, :self.num_point]
+
+        # batch_norm
+        x = rearrange(x, '(n m t) v c -> (n m v) c t', m=M, n=N)
+        x = self.data_bn(x)
+        x = rearrange(x, '(n m v) c t -> (n m t) v c', m=M, v=V)
 
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
