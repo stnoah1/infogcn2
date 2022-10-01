@@ -150,7 +150,6 @@ class InfoGCN(nn.Module):
         # )
 
         self.classifier = nn.Sequential(
-            # nn.Conv1d(2*base_channel, 2*base_channel, 1),
             # nn.ReLU(),
             # nn.Conv1d(2*base_channel, base_channel, 1),
             nn.ReLU(),
@@ -231,9 +230,9 @@ class InfoGCN(nn.Module):
         x = x + self.pos_embedding[:, :self.num_point]
 
         # batch_norm
-        x = rearrange(x, '(n m t) v c -> (n m v) c t', m=M, n=N)
-        x = self.data_bn(x)
-        x = rearrange(x, '(n m v) c t -> (n m t) v c', m=M, v=V)
+        # x = rearrange(x, '(n m t) v c -> (n m v) c t', m=M, n=N)
+        # x = self.data_bn(x)
+        # x = rearrange(x, '(n m v) c t -> (n m t) v c', m=M, v=V)
 
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
