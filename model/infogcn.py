@@ -35,7 +35,6 @@ class DiffeqSolver(nn.Module):
         """
         # Decode the trajectory through ODE Solver
         """
-        # max_order should be set tonumber of obs
         pred_y = odeint(self.ode_func, first_point, time_steps_to_predict,
                         rtol=self.odeint_rtol, atol=self.odeint_atol,
                         method=self.ode_method)
@@ -91,7 +90,7 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_solver_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, device='cuda',
-                 dct=True, ratio=0.9, T=64, obs=0.5):
+                 dct=True, T=64):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
@@ -99,7 +98,6 @@ class InfoGCN(nn.Module):
         A = np.stack([self.Graph.A_norm] * num_head, axis=0)
         self.dct = dct
         self.T = T
-        self.obs = obs
 
         self.num_class = num_class
         self.num_point = num_point
@@ -109,7 +107,7 @@ class InfoGCN(nn.Module):
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
         self.data_bn = nn.BatchNorm1d(base_channel)
         bn_init(self.data_bn, 1)
-        ode_func = ODEFunc(2*base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
+        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
         self.temporal_encoder = TemporalEncoder(
             seq_len=T,
             dim=base_channel,
@@ -134,16 +132,14 @@ class InfoGCN(nn.Module):
         # )
 
         self.recon_decoder = nn.Sequential(
-            SA_GC(2*base_channel, 2*base_channel, A),
-            SA_GC(2*base_channel, 2*base_channel, A),
-            SA_GC(2*base_channel, base_channel, A),
+            SA_GC(base_channel, base_channel, A),
+            SA_GC(base_channel, base_channel, A),
             nn.Conv2d(base_channel, 3, 1),
         )
 
         self.cls_decoder = nn.Sequential(
-            SA_GC(2*base_channel, 2*base_channel, A),
-            SA_GC(2*base_channel, 2*base_channel, A),
-            SA_GC(2*base_channel, base_channel, A),
+            SA_GC(base_channel, base_channel, A),
+            SA_GC(base_channel, base_channel, A),
             nn.ReLU(),
         )
 
@@ -191,17 +187,17 @@ class InfoGCN(nn.Module):
             for i in range(self.T-1):
                 zs.append(self.diffeq_solver(z[:,:,i:i+1,:], t[:2])[:,:,1:,:])
             z_pred = torch.cat(zs, dim=2)
-            z_cat = torch.cat([z,z_pred],axis=0) # 2*N*M, hidden_dim, T, V
+            # z_cat = torch.cat([z,z_pred],axis=0) # 2*N*M, hidden_dim, T, V
         else:
-            z_cat = z
+            z_pred = z
 
         # reconstruction
-        x_hat = self.recon_decoder(z_cat)
-        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=self.num_person)
+        x_hat = self.recon_decoder(z_pred)
+        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=M)
 
         # classification
-        z_cat = self.cls_decoder(z_cat)
-        z_cat = rearrange(z_cat, '(n m) c t v -> n m c t v').mean(-1).mean(1) # 2*N, 2*D, T
-        y = self.classifier(z_cat) # 2*N, num_cls, T
+        z_cls = self.cls_decoder(z)
+        z_cls = rearrange(z_cls, '(n m) c t v -> n m c t v', m=M).mean(-1).mean(1) # N, 2*D, T
+        y = self.classifier(z_cls) # N, num_cls, T
         kl_div = torch.tensor(0.0)
         return y, x_hat, kl_div

@@ -9,7 +9,7 @@ from feeders import tools
 class Feeder(Dataset):
     def __init__(self, data_path, label_path=None, p_interval=1, split='train', repeat=1, random_choose=False, random_shift=False,
                  random_move=False, random_rot=False, window_size=-1, normalization=False, debug=False, use_mmap=False,
-                 vel=False, sort=False, obs=1.0):
+                 vel=False, sort=False):
         """
         :param data_path:
         :param label_path:
@@ -40,8 +40,6 @@ class Feeder(Dataset):
         self.random_rot = random_rot
         self.vel = vel
         self.load_data()
-        self.obs = obs
-        print("obs: ",self.obs)
         if sort:
             self.get_n_per_class()
             self.sort()
@@ -101,11 +99,6 @@ class Feeder(Dataset):
         if self.vel:
             data_numpy[:, :-1] = data_numpy[:, 1:] - data_numpy[:, :-1]
             data_numpy[:, -1] = 0
-        # if self.obs < 1.0:
-            # idx = int(self.obs * self.window_size)
-            # # v = data_numpy[:,idx:idx+1,:,:]
-            # data_numpy[:,idx:,:,:] = 0
-
         return data_numpy, label, index
 
     def top_k(self, score, top_k):

@@ -26,7 +26,6 @@ def get_parser():
     parser.add_argument('--use_vel', type=str2bool, default=False, help='')
     parser.add_argument('--dct_order', type=int, default=64, help='')
 
-
     # processor
     parser.add_argument('--phase', default='train', help='must be train or test')
     parser.add_argument('--save_score', type=str2bool, default=False, help='if ture, the classification score will be stored')
@@ -78,7 +77,7 @@ def get_parser():
     parser.add_argument('--amp_opt_level', type=int, default=1, help='NVIDIA Apex AMP optimization level')
 
     # ODE
-    parser.add_argument('--obs', type=float, default=0.1, help='')
+    parser.add_argument('--n_step', type=float, default=1, help='')
 
     return parser
 

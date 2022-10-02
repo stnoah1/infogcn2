@@ -247,7 +247,7 @@ class Attention(nn.Module):
         qkv = self.to_qkv(x)
         qkv = rearrange(qkv, 'b c t v -> (b v) t c', v=V)
         qkv = qkv.chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv) # (N*V*M, H, T, D)
 
         attn = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 

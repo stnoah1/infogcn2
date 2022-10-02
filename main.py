@@ -88,7 +88,6 @@ class Processor():
                 vel=self.arg.use_vel,
                 random_rot=self.arg.random_rot,
                 sort=False,
-                obs=self.arg.obs
             ),
             batch_size=self.arg.batch_size,
             shuffle=True,
@@ -104,7 +103,6 @@ class Processor():
                 window_size=self.arg.window_size,
                 p_interval=[0.95],
                 vel=self.arg.use_vel,
-                obs=self.arg.obs
             ),
             batch_size=self.arg.test_batch_size,
             shuffle=False,
@@ -124,9 +122,7 @@ class Processor():
             k=self.arg.k,
             base_channel=self.arg.base_channel,
             device=self.device,
-            ratio=self.arg.pred_ratio,
             T=64,
-            obs=0.5
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = masked_recon_loss
@@ -227,12 +223,12 @@ class Processor():
             B, C, T, V, M = x.shape
             x = x.float().to(self.device)
             y = y.long().to(self.device)
-            t = int(T*self.arg.obs)
-            x_gt = x.unsqueeze(0).expand(2, B, C, T, V, M).reshape(2*B, C, T, V, M)
+            t = int(T*0.5)
+            x_gt = x.unsqueeze(0).expand(self.arg.n_step, B, C, T, V, M).reshape(self.arg.n_step*B, C, T, V, M)
             mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
             y_hat, x_hat, kl_div = self.model(x)
-            y_hat = rearrange(y_hat, "n i t -> (n t) i")
-            y = y.unsqueeze(0).unsqueeze(-1).expand(2, B, T).reshape(-1)
+            y_hat = rearrange(y_hat, "b i t -> (b t) i")
+            y = y.unsqueeze(-1).expand(B, T).reshape(-1)
             cls_loss = self.cls_loss(y_hat, y)
             if self.arg.dct:
                 x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
@@ -243,7 +239,7 @@ class Processor():
                 x_gt_dct = dct.dct(x_gt_)
                 recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
             else:
-                mask = mask.unsqueeze(0).expand(2, B, C, T, V, M).reshape(2*B, C, T, V, M)
+                mask = mask.unsqueeze(0).expand(self.arg.n_step, B, C, T, V, M).reshape(self.arg.n_step*B, C, T, V, M)
                 recon_loss = self.recon_loss(x_hat, x_gt, mask)
             recon_eval = self.recon_loss(x_hat[:,:,t:], x_gt[:,:,t:], mask[:,:,t:])
             loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss + kl_div
@@ -262,7 +258,7 @@ class Processor():
             value, predict_label = torch.max(y_hat.data, 1)
             for i, ratio in enumerate([0.1, 0.2, 0.3, 0.4, 0.5, 1.0]):
                 self.log_acc[i].update((predict_label == y.data)\
-                                        .view(2*B,T)[:,int(T*ratio)-1].float().mean(), B)
+                                        .view(self.arg.n_step*B,T)[:,int(T*ratio)-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
@@ -286,7 +282,7 @@ class Processor():
             "train/ACC_0.5":self.log_acc[4].avg,
             "train/ACC_1.0":self.log_acc[5].avg,
         })
-        with open(f"results/{self.arg.obs}/x_hat_list_train_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
+        with open(f"results/x_hat_list_train_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
             pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
         # statistics of time consumption and loss
         if save_model:
@@ -315,9 +311,9 @@ class Processor():
                 label_list.append(y)
                 with torch.no_grad():
                     B, _, T, _, _ = x.shape
+                    t = int(T*0.5)
                     x = x.float().to(self.device)
                     y = y.long().to(self.device)
-                    t = int(T*self.arg.obs)
                     x_gt = x
                     mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
 
@@ -371,7 +367,7 @@ class Processor():
                 "eval/ACC_0.5":self.log_acc[4].avg,
                 "eval/ACC_1.0":self.log_acc[5].avg,
             })
-            with open(f"results/{self.arg.obs}/x_hat_list_eval_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
+            with open(f"results/x_hat_list_eval_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
                 pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
 
             score = np.concatenate(score_frag)
