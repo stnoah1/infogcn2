@@ -110,7 +110,7 @@ class InfoGCN(nn.Module):
         self.data_bn = nn.BatchNorm1d(base_channel)
         bn_init(self.data_bn, 1)
         ode_func = ODEFunc(2*base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
-        self.temporal_encoder = TemporalEncoder(64, 2*base_channel, 2*base_channel, device=device)
+        self.temporal_encoder = TemporalEncoder(T, base_channel, 2*base_channel, device=device, A=A, num_point=num_point)
 
         self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
 
@@ -123,13 +123,6 @@ class InfoGCN(nn.Module):
             nn.Conv2d(2*base_channel, 2*base_channel, 1),
         )
 
-        self.spatial_encoder2 = nn.Sequential(
-            SA_GC(base_channel, base_channel, A),
-            # SA_GC(base_channel, base_channel, A),
-            # SA_GC(base_channel, 2*base_channel, A),
-            nn.Conv2d(base_channel, base_channel, 1),
-        )
-
         self.recon_decoder = nn.Sequential(
             SA_GC(2*base_channel, 2*base_channel, A),
             SA_GC(2*base_channel, 2*base_channel, A),
@@ -137,27 +130,12 @@ class InfoGCN(nn.Module):
             nn.Conv2d(base_channel, 3, 1),
         )
 
-        # self.cls_decoder =  nn.Sequential(
-            # EncodingBlock(base_channel, base_channel, A),
-            # EncodingBlock(base_channel, base_channel, A),
-            # EncodingBlock(base_channel, base_channel, A),
-            # EncodingBlock(base_channel, base_channel*2, A, stride=2),
-            # EncodingBlock(base_channel*2, base_channel*2, A),
-            # EncodingBlock(base_channel*2, base_channel*2, A),
-            # EncodingBlock(base_channel*2, base_channel*4, A, stride=2),
-            # EncodingBlock(base_channel*4, base_channel*4, A),
-            # EncodingBlock(base_channel*4, base_channel*4, A),
-        # )
-
         self.classifier = nn.Sequential(
-            # nn.ReLU(),
-            # nn.Conv1d(2*base_channel, base_channel, 1),
             nn.ReLU(),
             nn.Conv1d(2*base_channel, num_class, 1)
         )
 
-        self.zero_embed = nn.Parameter(torch.randn(2*base_channel, 25))
-
+        # self.zero_embed = nn.Parameter(torch.randn(2*base_channel, 25))
 
 
     def KL_div(self, fp_mu, fp_std, kl_coef=1):
@@ -172,55 +150,12 @@ class InfoGCN(nn.Module):
         loss = kldiv_z0.mean()
         return loss
 
-    def extrapolate(self, z):
-        '''
-        z : (n m) c t v
-        '''
-        t = torch.linspace(0, self.T, self.T+1).to(z.device)
-        zs = [z[:,:,:1,:]]
-        if self.training:
-            for i in range(self.T-1):
-                zs.append(self.diffeq_solver(z[:,:,i:i+1,:], t[:2])[:,:,1:,:])
-            z_hat = torch.cat(zs, dim=2)
-        else:
-            z_hat = z
-        return z_hat
-
     def get_A(self, k):
         A_outward = self.Graph.A_outward_binary
         I = np.eye(self.Graph.num_node)
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
     def forward(self, x, t, mask):
-        N, C, T, V, M = x.size()
-        z = self.encode(x, t)
-        z = self.temporal_encoder(z)
-        if self.training:
-            z_pred = self.extrapolate(z)
-            z_cat = torch.cat([z,z_pred],axis=0)
-        else:
-            z_cat = z
-        # mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
-        # z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,z.size(1),1,V).expand_as(z).to(z.dtype))
-        x_hat = self.reconstruct(z_cat)
-        y = self.classify(z_cat) #if reconstruction_only else torch.zeros(N,60).to(x.device).to(x.dtype)
-        kl_div = torch.tensor(0.0)
-        return y, x_hat, kl_div
-
-    def finetune(self, x, t, mask, training=True):
-        with torch.no_grad():
-            N, C, T, V, M = x.size()
-            z = self.encode(x, t)
-            z = self.diffeq_solver(z, t, training=False)
-            mask_ = rearrange(mask.detach().clone(), 'n c t v m -> (n m) c t v', m=M, n=N)
-            z = torch.where(mask_.expand_as(z), z, self.zero_embed.view(-1,64,1,25).expand_as(z).to(z.dtype))
-            x_recon = self.reconstruct(z, N)
-        z = self.encode2(x_recon, t)
-        y = self.classify(z)
-        kl_div = torch.tensor(0.0)
-        return y, x_recon, kl_div
-
-    def encode(self, x, t):
         N, C, T, V, M = x.size()
         x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
         x = self.A_vector.to(x.device).to(x.dtype).expand(N*M*T, -1, -1) @ x
@@ -229,40 +164,28 @@ class InfoGCN(nn.Module):
         x = self.to_joint_embedding(x)
         x = x + self.pos_embedding[:, :self.num_point]
 
-        # batch_norm
-        # x = rearrange(x, '(n m t) v c -> (n m v) c t', m=M, n=N)
-        # x = self.data_bn(x)
-        # x = rearrange(x, '(n m v) c t -> (n m t) v c', m=M, v=V)
-
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
         z = self.spatial_encoder(x)
-        return z
+        z = self.temporal_encoder(z)
 
-    def encode2(self, x, t):
-        with torch.no_grad():
-            N, C, T, V, M = x.size()
-            x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
-            x = self.A_vector.to(x.device).to(x.dtype).expand(N*M*T, -1, -1) @ x
+        # extrapolation
+        if self.training:
+            t = torch.linspace(0, self.T, self.T+1).to(z.device)
+            zs = [z[:,:,:1,:]]
+            for i in range(self.T-1):
+                zs.append(self.diffeq_solver(z[:,:,i:i+1,:], t[:2])[:,:,1:,:])
+            z_pred = torch.cat(zs, dim=2)
+            z_cat = torch.cat([z,z_pred],axis=0) # 2*N*M, hidden_dim, T, V
+        else:
+            z_cat = z
 
-            # embedding
-            x = self.to_joint_embedding(x)
-            x = x + self.pos_embedding[:, :self.num_point]
-
-            # encoding
-            x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
-        z = self.spatial_encoder2(x)
-        return z
-
-    def reconstruct(self, z):
-        _, C, T, V = z.size()
-        x_hat = self.recon_decoder(z)
+        # reconstruction
+        x_hat = self.recon_decoder(z_cat)
         x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=self.num_person)
-        return x_hat
 
-    def classify(self, z):
-        N, C, T, V = z.size()
-        # y = self.cls_decoder(z) # n c t v m
-        z = z.view(N//self.num_person, self.num_person, C, T, V).mean(-1).mean(1)
-        y = self.classifier(z).view(N//self.num_person, self.num_class, T)
-        return y
+        # classification
+        z_cat = z_cat.view(z_cat.size(0)//M, M, z_cat.size(1), T, V).mean(-1).mean(1) # 2*N, 2*D, T
+        y = self.classifier(z_cat) # 2*N, num_cls, T
+        kl_div = torch.tensor(0.0)
+        return y, x_hat, kl_div

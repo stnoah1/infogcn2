@@ -216,7 +216,8 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, seq_len, heads=8, dim_head=64, dropout=0., use_mask=False):
+    def __init__(self, dim, seq_len, heads=8, dim_head=64, dropout=0.,
+                 use_mask=False, SAGC_proj=False, A=1, num_point=25):
         super().__init__()
         inner_dim = dim_head *  heads
         project_out = not (heads == 1 and dim_head == dim)
@@ -224,11 +225,14 @@ class Attention(nn.Module):
         self.heads = heads
         self.scale = dim_head ** -0.5
         self.use_mask = use_mask
+        self.num_point = num_point
 
         self.attend = nn.Softmax(dim = -1)
         self.dropout = nn.Dropout(dropout)
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.to_qkv = SA_GC(dim, inner_dim * 3, A) if SAGC_proj else\
+            nn.Linear(dim, inner_dim * 3, bias = False)
+
         self.register_buffer("mask", torch.ones(seq_len, seq_len).tril()
                                      .view(1, 1, seq_len, seq_len))
         self.to_out = nn.Sequential(
@@ -237,9 +241,12 @@ class Attention(nn.Module):
         ) if project_out else nn.Identity()
 
     def forward(self, x):
-        B, T, C = x.shape
+        B, T, C = x.shape; V= self.num_point
 
-        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        x = rearrange(x, '(b v) t c -> b c t v', v=V)
+        qkv = self.to_qkv(x)
+        qkv = rearrange(qkv, 'b c t v -> (b v) t c', v=V)
+        qkv = qkv.chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
         attn = torch.matmul(q, k.transpose(-1, -2)) * self.scale
@@ -254,14 +261,15 @@ class Attention(nn.Module):
         return self.to_out(out), attn
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, max_seq_len, dropout=0., use_mask=True):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, max_seq_len,
+                 dropout=0., use_mask=True, A=1, num_point=25):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 PreNorm(dim, Attention(
                     dim, max_seq_len, heads=heads, dim_head=dim_head,
-                    dropout=dropout, use_mask=use_mask)
+                    dropout=dropout, use_mask=use_mask, SAGC_proj=True, A=A, num_point=num_point)
                 ),
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
             ]))
@@ -288,7 +296,7 @@ def PositionalEncoding(d_model: int, dropout: float = 0.1, max_len: int = 5000):
 
 
 class ViT(nn.Module):
-    def __init__(self, seq_len, dim_in, dim_out, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0.):
+    def __init__(self, seq_len, dim_in, dim_out, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0., A=1, num_point=25):
         super().__init__()
 
         self.to_embedding = nn.Sequential(
@@ -300,7 +308,7 @@ class ViT(nn.Module):
         self.pe = PositionalEncoding(d_model=dim, max_len=seq_len)
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout, A=A, num_point=num_point)
 
         self.to_latent = nn.Identity()
 
@@ -336,10 +344,10 @@ class ViT(nn.Module):
 
 
 class TemporalEncoder(nn.Module):
-    def __init__(self, seq_len, latent_dim, input_dim, device = torch.device("cpu")):
+    def __init__(self, seq_len, latent_dim, input_dim, device = torch.device("cpu"), A=1, num_point=25):
 
         super(TemporalEncoder, self).__init__()
-        self.transformer = ViT(seq_len, input_dim, latent_dim, latent_dim, depth=1, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4)
+        self.transformer = ViT(seq_len, input_dim, 2*latent_dim, latent_dim, depth=1, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4, A=A, num_point=num_point)
 
         self.latent_dim = latent_dim
         self.device = device
@@ -351,4 +359,4 @@ class TemporalEncoder(nn.Module):
         output = self.transformer(data)
 
         # why unsqueezed?
-        return output[:, :self.latent_dim, ...]#, output[:, self.latent_dim:, ...].abs()
+        return output[:, :, ...] # kl div has been removed.
