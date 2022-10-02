@@ -230,7 +230,7 @@ class Processor():
             t = int(T*self.arg.obs)
             x_gt = x.unsqueeze(0).expand(2, B, C, T, V, M).reshape(2*B, C, T, V, M)
             mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
-            y_hat, x_hat, kl_div = self.model(x, t, mask)
+            y_hat, x_hat, kl_div = self.model(x)
             y_hat = rearrange(y_hat, "n i t -> (n t) i")
             y = y.unsqueeze(0).unsqueeze(-1).expand(2, B, T).reshape(-1)
             cls_loss = self.cls_loss(y_hat, y)
@@ -256,7 +256,7 @@ class Processor():
             else:
                 loss.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
             value, predict_label = torch.max(y_hat.data, 1)
@@ -321,7 +321,7 @@ class Processor():
                     x_gt = x
                     mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
 
-                    y_hat, x_hat, kl_div = self.model(x, t, mask)
+                    y_hat, x_hat, kl_div = self.model(x)
                     y_hat = rearrange(y_hat, "n i t -> (n t) i")
                     y = y.unsqueeze(-1).expand(B, T).reshape(-1)
                     cls_loss = self.cls_loss(y_hat, y)

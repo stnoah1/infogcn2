@@ -295,26 +295,21 @@ def PositionalEncoding(d_model: int, dropout: float = 0.1, max_len: int = 5000):
 
 
 
-class ViT(nn.Module):
-    def __init__(self, seq_len, dim_in, dim_out, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0., A=1, num_point=25):
+class TemporalEncoder(nn.Module):
+    def __init__(self, seq_len, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0., A=1, num_point=25, device='cuda'):
         super().__init__()
 
-        self.to_embedding = nn.Sequential(
-            Rearrange('b c t v -> (b v) t c', t=seq_len),
-            nn.Linear(dim_in, dim),
-        )
-
         # self.pos_embedding = nn.Parameter(torch.randn(1, seq_len, dim))
-        self.pe = PositionalEncoding(d_model=dim, max_len=seq_len)
+        self.pe = PositionalEncoding(d_model=dim, max_len=seq_len).to(device)
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout, A=A, num_point=num_point)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout, A=A, num_point=num_point, use_mask=True)
 
         self.to_latent = nn.Identity()
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(dim),
-            nn.Linear(dim, dim_out)
+            nn.Linear(dim, dim)
         )
         self.apply(self._init_weights)
 
@@ -333,8 +328,8 @@ class ViT(nn.Module):
         out : b t c h w
         """
         B, C, T, V = x.shape
-        x = self.to_embedding(x)
-        x = x + self.pe[:, :T, :].to(x.device)
+        x = rearrange(x, 'b c t v -> (b v) t c')
+        x = x + self.pe[:, :T, :]
         # x = self.pos_embedding(x)
         x = self.transformer(x)
         x = self.to_latent(x)
@@ -342,21 +337,3 @@ class ViT(nn.Module):
         x = rearrange(x, '(b v) t c -> b c t v', v=V)
         return x
 
-
-class TemporalEncoder(nn.Module):
-    def __init__(self, seq_len, latent_dim, input_dim, device = torch.device("cpu"), A=1, num_point=25):
-
-        super(TemporalEncoder, self).__init__()
-        self.transformer = ViT(seq_len, input_dim, 2*latent_dim, latent_dim, depth=1, heads=4, mlp_dim=latent_dim*2, dim_head=latent_dim//4, A=A, num_point=num_point)
-
-        self.latent_dim = latent_dim
-        self.device = device
-
-    def forward(self, data):
-        # IMPORTANT: assumes that 'data' already has mask concatenated to it
-        # data : B C T V
-
-        output = self.transformer(data)
-
-        # why unsqueezed?
-        return output[:, :, ...] # kl div has been removed.

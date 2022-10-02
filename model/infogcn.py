@@ -110,18 +110,28 @@ class InfoGCN(nn.Module):
         self.data_bn = nn.BatchNorm1d(base_channel)
         bn_init(self.data_bn, 1)
         ode_func = ODEFunc(2*base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
-        self.temporal_encoder = TemporalEncoder(T, base_channel, 2*base_channel, device=device, A=A, num_point=num_point)
+        self.temporal_encoder = TemporalEncoder(
+            seq_len=T,
+            dim=base_channel,
+            depth=4,
+            heads=4,
+            mlp_dim=base_channel*2,
+            dim_head=base_channel//4,
+            device=device,
+            A=A,
+            num_point=num_point
+        )
 
         self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
 
-        self.spatial_encoder = nn.Sequential(
-            SA_GC(base_channel, 2*base_channel, A),
-            SA_GC(2*base_channel, 3*base_channel, A),
-            SA_GC(3*base_channel, 3*base_channel, A),
-            SA_GC(3*base_channel, 2*base_channel, A),
-            SA_GC(2*base_channel, 2*base_channel, A),
-            nn.Conv2d(2*base_channel, 2*base_channel, 1),
-        )
+        # self.spatial_encoder = nn.Sequential(
+            # SA_GC(base_channel, 2*base_channel, A),
+            # SA_GC(2*base_channel, 3*base_channel, A),
+            # SA_GC(3*base_channel, 3*base_channel, A),
+            # SA_GC(3*base_channel, 2*base_channel, A),
+            # SA_GC(2*base_channel, 2*base_channel, A),
+            # nn.Conv2d(2*base_channel, 2*base_channel, 1),
+        # )
 
         self.recon_decoder = nn.Sequential(
             SA_GC(2*base_channel, 2*base_channel, A),
@@ -130,10 +140,15 @@ class InfoGCN(nn.Module):
             nn.Conv2d(base_channel, 3, 1),
         )
 
-        self.classifier = nn.Sequential(
+        self.cls_decoder = nn.Sequential(
+            SA_GC(2*base_channel, 2*base_channel, A),
+            SA_GC(2*base_channel, 2*base_channel, A),
+            SA_GC(2*base_channel, base_channel, A),
             nn.ReLU(),
-            nn.Conv1d(2*base_channel, num_class, 1)
         )
+
+
+        self.classifier = nn.Conv1d(base_channel, num_class, 1)
 
         # self.zero_embed = nn.Parameter(torch.randn(2*base_channel, 25))
 
@@ -155,7 +170,7 @@ class InfoGCN(nn.Module):
         I = np.eye(self.Graph.num_node)
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
-    def forward(self, x, t, mask):
+    def forward(self, x):
         N, C, T, V, M = x.size()
         x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
         x = self.A_vector.to(x.device).to(x.dtype).expand(N*M*T, -1, -1) @ x
@@ -166,8 +181,8 @@ class InfoGCN(nn.Module):
 
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
-        z = self.spatial_encoder(x)
-        z = self.temporal_encoder(z)
+        # z = self.spatial_encoder(x)
+        z = self.temporal_encoder(x)
 
         # extrapolation
         if self.training:
@@ -185,7 +200,8 @@ class InfoGCN(nn.Module):
         x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=self.num_person)
 
         # classification
-        z_cat = z_cat.view(z_cat.size(0)//M, M, z_cat.size(1), T, V).mean(-1).mean(1) # 2*N, 2*D, T
+        z_cat = self.cls_decoder(z_cat)
+        z_cat = rearrange(z_cat, '(n m) c t v -> n m c t v').mean(-1).mean(1) # 2*N, 2*D, T
         y = self.classifier(z_cat) # 2*N, num_cls, T
         kl_div = torch.tensor(0.0)
         return y, x_hat, kl_div
