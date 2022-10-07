@@ -59,7 +59,7 @@ class Processor():
         self.log_recon_loss = AverageMeter()
         self.log_recon_2d_loss = AverageMeter()
         self.log_cls_loss = AverageMeter()
-        self.log_acc = [AverageMeter() for _ in range(6)]
+        self.log_acc = [AverageMeter() for _ in range(10)]
         self.log_kl_div = AverageMeter()
 
 
@@ -121,8 +121,10 @@ class Processor():
             num_head=self.arg.n_heads,
             k=self.arg.k,
             base_channel=self.arg.base_channel,
+            depth=self.arg.depth,
             device=self.device,
-            T=64,
+            T=self.arg.window_size,
+            n_step=self.arg.n_step,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = masked_recon_loss
@@ -209,7 +211,7 @@ class Processor():
 
     def train(self, epoch, save_model=False):
         self.model.train()
-        [self.log_acc[i].reset() for i in range(6)]
+        [self.log_acc[i].reset() for i in range(10)]
         self.log_cls_loss.reset()
         self.log_kl_div.reset()
         self.log_recon_loss.reset()
@@ -220,11 +222,11 @@ class Processor():
         tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
         for x, y, index in tbar:
-            B, C, T, V, M = x.shape
+            B, C, T, V, M = x.shape; N = self.arg.n_step
             x = x.float().to(self.device)
             y = y.long().to(self.device)
             t = int(T*0.5)
-            x_gt = x.unsqueeze(0).expand(self.arg.n_step, B, C, T, V, M).reshape(self.arg.n_step*B, C, T, V, M)
+            x_gt = x.unsqueeze(0).expand(N, B, C, T, V, M).reshape(N*B, C, T, V, M)
             mask = (abs(x).sum(1,keepdim=True).sum(3,keepdim=True) > 0)
             y_hat, x_hat, kl_div = self.model(x)
             y_hat = rearrange(y_hat, "b i t -> (b t) i")
@@ -239,7 +241,10 @@ class Processor():
                 x_gt_dct = dct.dct(x_gt_)
                 recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
             else:
-                mask = mask.unsqueeze(0).expand(self.arg.n_step, B, C, T, V, M).reshape(self.arg.n_step*B, C, T, V, M)
+                mask = torch.stack([mask]*N, dim=0)
+                for i in range(self.arg.n_step):
+                    mask[i,:,:,:i+1,:,:] = 0.
+                mask = mask.view(N*B,1,T,1,M).expand(N*B,C,T,V,M)
                 recon_loss = self.recon_loss(x_hat, x_gt, mask)
             recon_eval = self.recon_loss(x_hat[:,:,t:], x_gt[:,:,t:], mask[:,:,t:])
             loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss + kl_div
@@ -256,9 +261,9 @@ class Processor():
             self.optimizer.step()
 
             value, predict_label = torch.max(y_hat.data, 1)
-            for i, ratio in enumerate([0.1, 0.2, 0.3, 0.4, 0.5, 1.0]):
+            for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                 self.log_acc[i].update((predict_label == y.data)\
-                                        .view(self.arg.n_step*B,T)[:,int(T*ratio)-1].float().mean(), B)
+                                        .view(B,T)[:,int(T*ratio)-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
@@ -272,16 +277,12 @@ class Processor():
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 f"RECON2D:{self.log_recon_2d_loss.avg:.5f}, " \
             )
-        wandb.log({
+        train_dict = {
             "train/Recon2D_loss":self.log_recon_2d_loss.avg,
-            "train/cls_loss":self.log_cls_loss.avg,
-            "train/ACC_0.1":self.log_acc[0].avg,
-            "train/ACC_0.2":self.log_acc[1].avg,
-            "train/ACC_0.3":self.log_acc[2].avg,
-            "train/ACC_0.4":self.log_acc[3].avg,
-            "train/ACC_0.5":self.log_acc[4].avg,
-            "train/ACC_1.0":self.log_acc[5].avg,
-        })
+            "train/cls_loss":self.log_cls_loss.avg
+        }
+        train_dict.update({f"train/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
+        wandb.log(train_dict)
         with open(f"results/x_hat_list_train_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
             pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
         # statistics of time consumption and loss
@@ -293,7 +294,7 @@ class Processor():
 
     def eval(self, epoch, save_score=False, loader_name=['test']):
         self.model.eval()
-        [self.log_acc[i].reset() for i in range(6)]
+        [self.log_acc[i].reset() for i in range(10)]
         self.log_cls_loss.reset()
         self.log_kl_div.reset()
         self.log_recon_loss.reset()
@@ -340,7 +341,7 @@ class Processor():
                     _, predict_label = torch.max(y_hat.data, 1)
                     pred_list.append(predict_label.view(B,T)[:,t].data.cpu().numpy())
                     step += 1
-                for i, ratio in enumerate([0.1, 0.2, 0.3, 0.4, 0.5, 1.0]):
+                for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\
                                            .view(B,T)[:,int(T*ratio)-1].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
@@ -357,16 +358,12 @@ class Processor():
                     f"RECON2D:{self.log_recon_2d_loss.avg:.5f}, " \
                 )
 
-            wandb.log({
+            eval_dict = {
                 "eval/Recon2D_loss":self.log_recon_2d_loss.avg,
-                "eval/cls_loss":self.log_cls_loss.avg,
-                "eval/ACC_0.1":self.log_acc[0].avg,
-                "eval/ACC_0.2":self.log_acc[1].avg,
-                "eval/ACC_0.3":self.log_acc[2].avg,
-                "eval/ACC_0.4":self.log_acc[3].avg,
-                "eval/ACC_0.5":self.log_acc[4].avg,
-                "eval/ACC_1.0":self.log_acc[5].avg,
-            })
+                "eval/cls_loss":self.log_cls_loss.avg
+            }
+            eval_dict.update({f"eval/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
+            wandb.log(eval_dict)
             with open(f"results/x_hat_list_eval_{self.arg.base_channel}_{self.arg.base_lr}_{epoch}_{self.arg.dct}.pkl", 'wb') as fp:
                 pickle.dump({"x_hat":x_hat, "x":x_gt}, fp)
 
@@ -377,11 +374,11 @@ class Processor():
 
             score_dict = dict(
                 zip(self.data_loader[ln].dataset.sample_name, score))
-            self.print_log('\tMean {} loss of {} batches: {:4f}.'.format(
-                ln, self.arg.n_desired//self.arg.batch_size, np.mean(cls_loss_value)))
-            for k in self.arg.show_topk:
-                self.print_log('\tTop{}: {:.2f}%'.format(
-                    k, 100 * self.data_loader[ln].dataset.top_k(score, k)))
+            # self.print_log('\tMean {} loss of {} batches: {:4f}.'.format(
+                # ln, self.arg.n_desired//self.arg.batch_size, np.mean(cls_loss_value)))
+            # for k in self.arg.show_topk:
+                # self.print_log('\tTop{}: {:.2f}%'.format(
+                    # k, 100 * self.data_loader[ln].dataset.top_k(score, k)))
 
             if save_score:
                 with open('{}/epoch{}_{}_score.pkl'.format(
@@ -395,7 +392,7 @@ class Processor():
                 with open(f'{self.arg.work_dir}/best_score.pkl', 'wb') as f:
                     pickle.dump(score_dict, f)
 
-            print('Accuracy: ', accuracy, ' model: ', self.arg.model_saved_name)
+            # print('Accuracy: ', accuracy, ' model: ', self.arg.model_saved_name)
             # acc for each class:
             label_list = np.concatenate(label_list)
             pred_list = np.concatenate(pred_list)
@@ -451,6 +448,7 @@ def main():
     parser = get_parser()
     arg = parser.parse_args()
     arg.work_dir = wandb.run.dir
+    wandb.config.update(arg)
     init_seed(arg.seed)
     # execute process
     processor = Processor(arg)
