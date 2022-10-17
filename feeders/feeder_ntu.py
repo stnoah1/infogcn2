@@ -8,8 +8,8 @@ from feeders import tools
 
 class Feeder(Dataset):
     def __init__(self, data_path, label_path=None, p_interval=1, split='train', repeat=1, random_choose=False, random_shift=False,
-                 random_move=False, random_rot=False, window_size=-1, normalization=False, debug=False, use_mmap=False,
-                 vel=False, sort=False):
+                 random_move=False, random_rot=False, window_size=64, normalization=False, debug=False, use_mmap=False,
+                 vel=False, sort=False, A=None):
         """
         :param data_path:
         :param label_path:
@@ -39,6 +39,7 @@ class Feeder(Dataset):
         self.p_interval = p_interval
         self.random_rot = random_rot
         self.vel = vel
+        self.A = A
         self.load_data()
         if sort:
             self.get_n_per_class()
@@ -53,16 +54,18 @@ class Feeder(Dataset):
             self.data = npz_data['x_train']
             self.label = np.argmax(npz_data['y_train'], axis=-1)
             self.sample_name = ['train_' + str(i) for i in range(len(self.data))]
-            N, T, _ = self.data.shape
-            self.data = self.data.reshape((N, T, 2, 25, 3)).transpose(0, 4, 1, 3, 2)
         elif self.split == 'test':
             self.data = npz_data['x_test']
-            N, T, _ = self.data.shape
-            self.data = self.data.reshape((N, T, 2, 25, 3)).transpose(0, 4, 1, 3, 2)
             self.label = np.argmax(npz_data['y_test'], axis=-1)
             self.sample_name = ['test_' + str(i) for i in range(len(self.data))]
         else:
             raise NotImplementedError('data split only supports train/test')
+
+        N, T, _ = self.data.shape
+        if self.A is not None:
+            self.data = self.data.reshape((N*T*2, 25, 3))
+            self.data = np.array(self.A) @ self.data # x = N C T V M
+        self.data = self.data.reshape(N, T, 2, 25, 3).transpose(0, 4, 1, 3, 2)
 
     def get_n_per_class(self):
         self.n_per_cls = np.zeros(len(self.label), dtype=int)
@@ -91,15 +94,17 @@ class Feeder(Dataset):
         data_numpy = self.data[index]
         label = self.label[index]
         data_numpy = np.array(data_numpy)
-        valid_frame_num = np.sum(data_numpy.sum(0).sum(-1).sum(-1) != 0)
+        valid_frame = data_numpy.sum(0, keepdims=True).sum(2, keepdims=True)
+        valid_frame_num = np.sum(np.squeeze(valid_frame).sum(-1) != 0)
         # reshape Tx(MVC) to CTVM
         data_numpy = tools.valid_crop_resize(data_numpy, valid_frame_num, self.p_interval, self.window_size)
+        mask = (abs(data_numpy.sum(0, keepdims=True).sum(2, keepdims=True)) > 0)
         if self.random_rot:
             data_numpy = tools.random_rot(data_numpy)
         if self.vel:
             data_numpy[:, :-1] = data_numpy[:, 1:] - data_numpy[:, :-1]
             data_numpy[:, -1] = 0
-        return data_numpy, label, index
+        return data_numpy, label, mask, index
 
     def top_k(self, score, top_k):
         rank = score.argsort()

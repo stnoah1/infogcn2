@@ -309,7 +309,7 @@ class TemporalEncoder(nn.Module):
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(dim),
-            nn.Linear(dim, dim)
+            nn.Linear(dim, 2*dim)
         )
         self.apply(self._init_weights)
 
@@ -335,5 +335,5 @@ class TemporalEncoder(nn.Module):
         x = self.to_latent(x)
         x = self.mlp_head(x)
         x = rearrange(x, '(b v) t c -> b c t v', v=V)
-        return x
+        return x[:,:C,:,:], x[:,C:,:,:].abs() + 1e-5
 
