@@ -47,3 +47,14 @@ def sample_standard_gaussian(mu, sigma):
     d = torch.distributions.normal.Normal(torch.Tensor([0.]).to(device), torch.Tensor([1.]).to(device))
     r = d.sample(mu.size()).squeeze(-1)
     return r * sigma.float() + mu.float()
+
+def cum_mean_pooling(x, denom, dim=-1):
+    x = torch.cumsum(x, dim=dim) / denom
+    return x
+
+def cum_max_pooling(x, denom, dim=-1):
+    x, idx = torch.cummax(x, dim=dim)
+    return x
+
+def identity(x, *args):
+    return x

@@ -56,6 +56,7 @@ def get_parser():
     parser.add_argument('--z_prior_gain', type=int, default=3, help='')
     parser.add_argument('--graph', type=str, default='graph.ntu_rgb_d.Graph', help='')
     parser.add_argument('--dct', type=str2bool, default=False, help='')
+    parser.add_argument('--pooling', type=str, default="None", help='')
 
     # optim
     parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
@@ -66,7 +67,7 @@ def get_parser():
     parser.add_argument('--test_batch_size', type=int, default=64, help='test batch size')
     parser.add_argument('--start_epoch', type=int, default=0, help='start training from which epoch')
     parser.add_argument('--num_epoch', type=int, default=110, help='stop training in which epoch')
-    parser.add_argument('--weight_decay', type=float, default=0.0005, help='weight decay for optimizer')
+    parser.add_argument('--weight_decay', type=float, default=0.0003, help='weight decay for optimizer')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--warm_up_epoch', type=int, default=0)
     parser.add_argument('--lambda_1', type=float, default=1e-0)

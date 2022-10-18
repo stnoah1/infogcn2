@@ -126,6 +126,7 @@ class Processor():
             T=self.arg.window_size,
             n_step=self.arg.n_step,
             dilation=self.arg.dilation,
+            pooling=self.arg.pooling,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = masked_recon_loss
@@ -228,12 +229,12 @@ class Processor():
             x = x.float().to(self.device)
             y = y.long().to(self.device)
             mask = mask.long().to(self.device)
-            y_hat, x_hat, kl_div, z = self.model(x)
+            y_hat, x_hat, kl_div = self.model(x)
 
             if self.arg.lambda_1:
                 N_cls = y_hat.size(0)//B
+                y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
                 y_hat = rearrange(y_hat, "b i t -> (b t) i")
-                y = y.view(1,B,1).expand(N_cls, B, T).reshape(-1)
                 cls_loss = self.arg.lambda_1 * self.cls_loss(y_hat, y)
 
             if self.arg.lambda_2:
@@ -264,7 +265,7 @@ class Processor():
             value, predict_label = torch.max(y_hat.data, 1)
             for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                 self.log_acc[i].update((predict_label == y.data)\
-                                        .view(N_cls*B,T)[:,int(T*ratio)-1].float().mean(), B)
+                                        .view(N_cls*B,-1)[:,int(T*ratio)-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
@@ -277,7 +278,7 @@ class Processor():
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
             )
         train_dict = {
-            "train/Recon2D_loss":self.log_recon_2d_loss.avg,
+            "train/Recon2D_loss":self.log_recon_loss.avg,
             "train/cls_loss":self.log_cls_loss.avg
         }
         train_dict.update({f"train/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
@@ -302,7 +303,6 @@ class Processor():
             cls_loss_value = []
             score_frag = []
             label_list = []
-            pred_list = []
             step = 0
             tbar = tqdm(self.data_loader[ln], dynamic_ncols=True)
             for x, y, mask, index in tbar:
@@ -314,10 +314,10 @@ class Processor():
                     mask = mask.long().to(self.device)
                     x_gt = x
 
-                    y_hat, x_hat, kl_div, z = self.model(x)
+                    y_hat, x_hat, kl_div = self.model(x)
                     N_cls = y_hat.size(0)//B
+                    y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
                     y_hat = rearrange(y_hat, "b i t -> (b t) i")
-                    y = y.view(1,B,1).expand(N_cls, B, T).reshape(-1)
                     cls_loss = self.cls_loss(y_hat, y)
                     if self.arg.dct:
                         x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
@@ -344,11 +344,10 @@ class Processor():
                     cls_loss_value.append(cls_loss.data.item())
 
                     _, predict_label = torch.max(y_hat.data, 1)
-                    pred_list.append(predict_label.view(N_cls*B,T).data.cpu().numpy())
                     step += 1
                 for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\
-                                           .view(N_cls,B,T)[0,:,int(T*ratio)-1].float().mean(), B)
+                                           .view(N_cls,B,-1)[N_cls-1,:,int(T*ratio)-1].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
                 self.log_kl_div.update(kl_div.data.item(), B)
@@ -362,7 +361,7 @@ class Processor():
                 )
 
             eval_dict = {
-                "eval/Recon2D_loss":self.log_recon_2d_loss.avg,
+                "eval/Recon2D_loss":self.log_recon_loss.avg,
                 "eval/cls_loss":self.log_cls_loss.avg
             }
             eval_dict.update({f"eval/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
@@ -394,7 +393,6 @@ class Processor():
             # print('Accuracy: ', accuracy, ' model: ', self.arg.model_saved_name)
             # acc for each class:
             label_list = np.concatenate(label_list)
-            pred_list = np.concatenate(pred_list)
 
 
     def start(self):

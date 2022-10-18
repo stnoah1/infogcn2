@@ -10,7 +10,8 @@ from torch import nn
 from einops import rearrange
 
 from model.modules import EncodingBlock, SA_GC, TemporalEncoder
-from model.utils import bn_init, import_class, sample_standard_gaussian
+from model.utils import bn_init, import_class, sample_standard_gaussian,\
+    cum_mean_pooling, cum_max_pooling, identity
 from model.encoder_decoder import Encoder_z0_RNN
 
 from einops import rearrange, repeat
@@ -213,7 +214,7 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 dct=True, T=64, n_step=1, dilation=1):
+                 dct=True, T=64, n_step=1, dilation=1, pooling="None"):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
@@ -222,6 +223,7 @@ class InfoGCN(nn.Module):
         self.dct = dct
         self.T = T
         method = ode_method
+        self.arange = torch.arange(T).view(1,1,T)+1
 
         self.num_class = num_class
         self.num_point = num_point
@@ -267,6 +269,13 @@ class InfoGCN(nn.Module):
         )
 
         self.classifier = nn.Conv1d(base_channel, num_class, 1)
+
+        if pooling == "max":
+            self.pooling = cum_max_pooling
+        elif pooling == "mean":
+            self.pooling = cum_mean_pooling
+        elif pooling == "None":
+            self.pooling = identity
 
         # self.zero_embed = nn.Parameter(torch.randn(2*base_channel, 25))
 
@@ -315,5 +324,7 @@ class InfoGCN(nn.Module):
         # classification
         z_cls = self.cls_decoder(z_cls)
         z_cls = rearrange(z_cls, '(n m) c t v -> n m c t v', m=M).mean(-1).mean(1) # N, 2*D, T
+        z_cls = self.pooling(z_cls, self.arange.to(z_cls.device), dim=-1)
+
         y = self.classifier(z_cls) # N, num_cls, T
         return y, x_hat, kl_div
