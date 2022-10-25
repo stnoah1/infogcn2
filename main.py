@@ -127,6 +127,8 @@ class Processor():
             n_step=self.arg.n_step,
             dilation=self.arg.dilation,
             pooling=self.arg.pooling,
+            SAGC_proj=self.arg.SAGC_proj,
+            sigma=self.arg.sigma,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = masked_recon_loss
@@ -259,7 +261,8 @@ class Processor():
             else:
                 loss.backward()
 
-            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)# if self.arg.datacase=="NTU120_CSet" \
+                #else  nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
             value, predict_label = torch.max(y_hat.data, 1)
@@ -303,6 +306,7 @@ class Processor():
             cls_loss_value = []
             score_frag = []
             label_list = []
+            pred_list = []
             step = 0
             tbar = tqdm(self.data_loader[ln], dynamic_ncols=True)
             for x, y, mask, index in tbar:
@@ -316,6 +320,7 @@ class Processor():
 
                     y_hat, x_hat, kl_div = self.model(x)
                     N_cls = y_hat.size(0)//B
+                    # pred_list.append(y_hat.view(N_cls,B,-1).detach().cpu().numpy())
                     y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
                     y_hat = rearrange(y_hat, "b i t -> (b t) i")
                     cls_loss = self.cls_loss(y_hat, y)
@@ -393,6 +398,11 @@ class Processor():
             # print('Accuracy: ', accuracy, ' model: ', self.arg.model_saved_name)
             # acc for each class:
             label_list = np.concatenate(label_list)
+            # pred_lst = np.concatenate(pred_list, axis=1)
+            # with open('pred_lst.pkl', 'wb') as f:
+                # pickle.dump(pred_lst, f)
+            # with open('label_list.pkl', 'wb') as f:
+                # pickle.dump(label_list, f)
 
 
     def start(self):
@@ -434,6 +444,7 @@ class Processor():
             if self.arg.weights is None:
                 raise ValueError('Please appoint --weights.')
             self.arg.print_log = False
+            self.model.set_n_sample(self.arg.n_sample)
             # self.print_log('Model:   {}.'.format(self.arg.model))
             self.print_log('Weights: {}.'.format(self.arg.weights))
             self.eval(epoch=0, save_score=self.arg.save_score, loader_name=['test'])

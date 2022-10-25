@@ -9,7 +9,7 @@ from torch import nn
 
 from einops import rearrange
 
-from model.modules import EncodingBlock, SA_GC, TemporalEncoder
+from model.modules import EncodingBlock, SA_GC, TemporalEncoder, GCN
 from model.utils import bn_init, import_class, sample_standard_gaussian,\
     cum_mean_pooling, cum_max_pooling, identity
 from model.encoder_decoder import Encoder_z0_RNN
@@ -115,7 +115,7 @@ class RK4(nn.Module):
 
 
 class SDE(nn.Module):
-    def __init__(self, mu, sigma, T, n_step, dilation):
+    def __init__(self, mu, sigma, T, n_step, dilation=1):
         super(SDE, self).__init__()
 
         self.mu = mu
@@ -123,16 +123,18 @@ class SDE(nn.Module):
         self.n_step = n_step
         self.dilation = dilation
         self.shift_idx = torch.arange(0, T, dtype=int).view(1,1,T,1)
+        self.n_sample = 1
 
     def forward(self, z):
         """
         # n-step forward with initial point z: (b c t v)
         """
         B, C, T, V = z.size()
-        z_shift_lst = [z]
+        z = repeat(z, 'b c t v -> (b l) c t v', l=self.n_sample)
         z_lst = [z]
-        shift_tensor = self.shift_idx.expand(B,C,T,V).to(z.device)
-        z = rearrange(z, 'b c t v -> (b t) c v')
+        z_shift_lst = [z]
+        z = rearrange(z, '(b l) c t v -> (b t l) c v', l=self.n_sample)
+        shift_tensor = self.shift_idx.expand(B*self.n_sample,C,T,V).to(z.device)
         dt = 1
         for i in range(1, self.n_step+1):
             z = z \
@@ -140,22 +142,30 @@ class SDE(nn.Module):
                 + self.sigma(z) * self.dW(z) \
                 + 0.5 * self.sigma(z)**2 * z * (self.dW(z)**2 - dt)
 
-            z_append = rearrange(z, '(b t) c v -> b c t v', t=T)
-            z_cls = rearrange(z, '(b t) c v -> b c t v', t=T)
+            z_append = rearrange(z, '(b t l) c v -> (b l) c t v', t=T, l=self.n_sample)
+            z_cls = rearrange(z, '(b t l) c v -> (b l) c t v', t=T, l=self.n_sample)
             z_append = torch.gather(z_append, dim=2, index=(shift_tensor-i*self.dilation)%T)
             z_append[:,:,:i*self.dilation,:] = 0
             z_shift_lst.append(z_append)
             z_lst.append(z_cls)
-        z_shift_lst = torch.cat(z_shift_lst, dim=0) # n-step*b, c, t, v
-        z_cls = torch.cat(z_lst, dim=0) # n-step*b, c, t, v
+        z_shift_lst = torch.cat(z_shift_lst, dim=0) # n-step*b*m, c, t, v
+        z_cls = torch.cat(z_lst, dim=0) # n-step*b*m, c, t, v
         return z_shift_lst, z_cls
 
     def dW(self, z, dt=1):
-        if self.training:
+        if not self.training and (self.n_sample != 1):
+            B, C, V = z.shape
+            noise = torch.normal(torch.zeros((B,C,V), device=z.device), \
+                            torch.ones((B,C,V), device=z.device)*math.sqrt(dt))
+            return noise
+        elif self.training:
             return torch.normal(torch.zeros_like(z, device=z.device), \
                             torch.ones_like(z, device=z.device)*math.sqrt(dt))
         else:
             return torch.zeros_like(z, device=z.device)
+
+    def set_n_sample(self, n):
+        self.n_sample = n
 
 
 class ODEFunc(nn.Module):
@@ -214,7 +224,7 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 dct=True, T=64, n_step=1, dilation=1, pooling="None"):
+                 dct=True, T=64, n_step=1, dilation=1, pooling="None", SAGC_proj=True, n_sample=1, sigma=None):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
@@ -242,13 +252,15 @@ class InfoGCN(nn.Module):
             dim_head=base_channel//4,
             device=device,
             A=A,
-            num_point=num_point
+            num_point=num_point,
+            SAGC_proj=SAGC_proj
         )
+        self.n_sample = n_sample
 
         # self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
         if method == "sde":
             mu = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
-            sigma = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device)
+            sigma = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device) if sigma is None else lambda x: sigma
             self.n_step_ode = SDE(mu, sigma, T=T, n_step=n_step, dilation=dilation)
         elif method == "rk4":
             ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
@@ -258,14 +270,14 @@ class InfoGCN(nn.Module):
             self.n_step_ode = Euler(ode_func, T=T, n_step=n_step, dilation=dilation)
 
         self.recon_decoder = nn.Sequential(
-            SA_GC(base_channel, base_channel, A),
-            SA_GC(base_channel, base_channel, A),
+            GCN(base_channel, base_channel, A),
+            GCN(base_channel, base_channel, A),
             nn.Conv2d(base_channel, 3, 1),
         )
 
         self.cls_decoder = nn.Sequential(
-            SA_GC(base_channel, base_channel, A),
-            SA_GC(base_channel, base_channel, A),
+            GCN(base_channel, base_channel, A),
+            GCN(base_channel, base_channel, A),
         )
 
         self.classifier = nn.Conv1d(base_channel, num_class, 1)
@@ -297,6 +309,10 @@ class InfoGCN(nn.Module):
         I = np.eye(self.Graph.num_node)
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
+    def set_n_sample(self, n_sample):
+        self.n_sample = n_sample
+        self.n_step_ode.set_n_sample(n_sample)
+
     def forward(self, x):
         N, C, T, V, M = x.size()
         x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
@@ -308,23 +324,24 @@ class InfoGCN(nn.Module):
 
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
-        z_mu, z_std = self.temporal_encoder(x)
-        kl_div = self.KL_div(z_mu, z_std)
-        z = sample_standard_gaussian(z_mu, z_std)
+        z = self.temporal_encoder(x)
+        # kl_div = self.KL_div(z_mu, z_std)
+        # z = sample_standard_gaussian(z_mu, z_std)
+
+        # z = z_mu
 
         # extrapolation
-        # if self.training:
         z_shift_lst, z_cls = self.n_step_ode(z)
-        # else:
-            # z_shift_lst = z
+
         # reconstruction
         x_hat = self.recon_decoder(z_shift_lst)
-        x_hat = rearrange(x_hat, '(n m) c t v -> n c t v m', m=M)
+        x_hat = rearrange(x_hat, '(n m l) c t v -> n l c t v m', m=M, l=self.n_sample).mean(1)
 
         # classification
         z_cls = self.cls_decoder(z_cls)
-        z_cls = rearrange(z_cls, '(n m) c t v -> n m c t v', m=M).mean(-1).mean(1) # N, 2*D, T
+        z_cls = rearrange(z_cls, '(n m l) c t v -> (n l) m c t v', m=M, l=self.n_sample).mean(-1).mean(1) # N, 2*D, T
         z_cls = self.pooling(z_cls, self.arange.to(z_cls.device), dim=-1)
 
         y = self.classifier(z_cls) # N, num_cls, T
-        return y, x_hat, kl_div
+        y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
+        return y, x_hat, torch.tensor(0.)

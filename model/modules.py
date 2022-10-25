@@ -174,6 +174,58 @@ class SA_GC(nn.Module):
 
         return out
 
+class GCN(nn.Module):
+    def __init__(self, in_channels, out_channels, A):
+        super(GCN, self).__init__()
+        self.out_c = out_channels
+        self.in_c = in_channels
+        self.num_head= A.shape[0]
+        self.shared_topology = nn.Parameter(torch.from_numpy(A.astype(np.float32)), requires_grad=True)
+
+        self.conv_d = nn.ModuleList()
+        for i in range(self.num_head):
+            self.conv_d.append(nn.Conv2d(in_channels, out_channels, 1))
+
+        if in_channels != out_channels:
+            self.down = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 1),
+                nn.BatchNorm2d(out_channels)
+            )
+        else:
+            self.down = lambda x: x
+
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                conv_init(m)
+            elif isinstance(m, nn.BatchNorm2d):
+                bn_init(m, 1)
+        bn_init(self.bn, 1e-6)
+        for i in range(self.num_head):
+            conv_branch_init(self.conv_d[i], self.num_head)
+
+    def forward(self, x):
+        N, C, T, V = x.size()
+
+        out = None
+        A = self.shared_topology.unsqueeze(0)
+        for h in range(self.num_head):
+            A_h = A[:, h, :, :] # (nt)vv
+            feature = rearrange(x, 'n c t v -> (n t) v c')
+            z = A_h@feature
+            z = rearrange(z, '(n t) v c-> n c t v', t=T).contiguous()
+            z = self.conv_d[h](z)
+            out = z + out if out is not None else z
+
+        out = self.bn(out)
+        out += self.down(x)
+        out = self.relu(out)
+
+        return out
+
+
 class EncodingBlock(nn.Module):
     def __init__(self, in_channels, out_channels, A, stride=1, residual=True):
         super(EncodingBlock, self).__init__()
@@ -231,7 +283,7 @@ class Attention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         self.to_qkv = SA_GC(dim, inner_dim * 3, A) if SAGC_proj else\
-            nn.Linear(dim, inner_dim * 3, bias = False)
+            GCN(dim, inner_dim * 3, A)
 
         self.register_buffer("mask", torch.ones(seq_len, seq_len).tril()
                                      .view(1, 1, seq_len, seq_len))
@@ -262,14 +314,14 @@ class Attention(nn.Module):
 
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, max_seq_len,
-                 dropout=0., use_mask=True, A=1, num_point=25):
+                 dropout=0., use_mask=True, A=1, num_point=25, SAGC_proj=True):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 PreNorm(dim, Attention(
                     dim, max_seq_len, heads=heads, dim_head=dim_head,
-                    dropout=dropout, use_mask=use_mask, SAGC_proj=True, A=A, num_point=num_point)
+                    dropout=dropout, use_mask=use_mask, SAGC_proj=SAGC_proj, A=A, num_point=num_point)
                 ),
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
             ]))
@@ -296,21 +348,21 @@ def PositionalEncoding(d_model: int, dropout: float = 0.1, max_len: int = 5000):
 
 
 class TemporalEncoder(nn.Module):
-    def __init__(self, seq_len, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0., A=1, num_point=25, device='cuda'):
+    def __init__(self, seq_len, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0., A=1, num_point=25, SAGC_proj=True, device='cuda'):
         super().__init__()
 
         # self.pos_embedding = nn.Parameter(torch.randn(1, seq_len, dim))
         self.pe = PositionalEncoding(d_model=dim, max_len=seq_len).to(device)
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout, A=A, num_point=num_point, use_mask=True)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout, A=A, num_point=num_point, use_mask=True, SAGC_proj=SAGC_proj)
 
         self.to_latent = nn.Identity()
 
-        self.mlp_head = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, 2*dim)
-        )
+        # self.mlp_head = nn.Sequential(
+            # nn.LayerNorm(dim),
+            # nn.Linear(dim, 2*dim)
+        # )
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -333,7 +385,7 @@ class TemporalEncoder(nn.Module):
         # x = self.pos_embedding(x)
         x = self.transformer(x)
         x = self.to_latent(x)
-        x = self.mlp_head(x)
+        # x = self.mlp_head(x)
         x = rearrange(x, '(b v) t c -> b c t v', v=V)
-        return x[:,:C,:,:], x[:,C:,:,:].abs() + 1e-5
+        return x[:,:C,:,:]
 
