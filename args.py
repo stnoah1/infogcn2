@@ -64,7 +64,7 @@ def get_parser():
     # optim
     parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
     parser.add_argument('--step', type=int, default=[10, 15], nargs='+', help='the epoch where optimizer reduce the learning rate')
-    parser.add_argument('--optimizer', default='Adam', help='type of optimizer')
+    parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
     parser.add_argument('--nesterov', type=str2bool, default=True, help='use nesterov or not')
     parser.add_argument('--batch_size', type=int, default=64, help='training batch size')
     parser.add_argument('--test_batch_size', type=int, default=64, help='test batch size')
