@@ -58,3 +58,8 @@ def cum_max_pooling(x, denom, dim=-1):
 
 def identity(x, denom, dim=-1):
     return x
+
+def max_pooling(x, dim=-1):
+    x, idx = torch.max(x, dim=dim)
+    return x
+

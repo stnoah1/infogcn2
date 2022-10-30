@@ -126,7 +126,8 @@ class Processor():
             T=self.arg.window_size,
             n_step=self.arg.n_step,
             dilation=self.arg.dilation,
-            pooling=self.arg.pooling,
+            temporal_pooling=self.arg.temporal_pooling,
+            spatial_pooling=self.arg.spatial_pooling,
             SAGC_proj=self.arg.SAGC_proj,
             sigma=self.arg.sigma,
         )
@@ -226,7 +227,7 @@ class Processor():
         tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
         for x, y, mask, index in tbar:
-            cls_loss, recon_loss = 0., 0.
+            cls_loss, recon_loss = torch.tensor(0.), torch.tensor(0.)
             B, C, T, V, M = x.shape;
             x = x.float().to(self.device)
             y = y.long().to(self.device)
@@ -416,8 +417,8 @@ class Processor():
 
                 self.train(epoch, save_model=save_model)
 
-                # if epoch > 80:
-                self.eval(epoch, save_score=self.arg.save_score, loader_name=['test'])
+                if epoch > self.arg.save_epoch:
+                    self.eval(epoch, save_score=self.arg.save_score, loader_name=['test'])
 
             # test the best model
             weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]

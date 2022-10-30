@@ -11,7 +11,7 @@ from einops import rearrange
 
 from model.modules import EncodingBlock, SA_GC, TemporalEncoder, GCN
 from model.utils import bn_init, import_class, sample_standard_gaussian,\
-    cum_mean_pooling, cum_max_pooling, identity
+    cum_mean_pooling, cum_max_pooling, identity, max_pooling
 from model.encoder_decoder import Encoder_z0_RNN
 
 from einops import rearrange, repeat
@@ -137,10 +137,14 @@ class SDE(nn.Module):
         shift_tensor = self.shift_idx.expand(B*self.n_sample,C,T,V).to(z.device)
         dt = 1
         for i in range(1, self.n_step+1):
-            z = z \
-                + self.mu(z) * dt \
-                + self.sigma(z) * self.dW(z) \
-                + 0.5 * self.sigma(z)**2 * z * (self.dW(z)**2 - dt)
+            if self.training:
+                z = z \
+                    + self.mu(z) * dt \
+                    + self.sigma(z) * self.dW(z) \
+                    + 0.5 * self.sigma(z)**2 * z * (self.dW(z)**2 - dt)
+            else:
+                z = z \
+                    + self.mu(z) * dt
 
             z_append = rearrange(z, '(b t l) c v -> (b l) c t v', t=T, l=self.n_sample)
             z_cls = rearrange(z, '(b t l) c v -> (b l) c t v', t=T, l=self.n_sample)
@@ -158,11 +162,9 @@ class SDE(nn.Module):
             noise = torch.normal(torch.zeros((B,C,V), device=z.device), \
                             torch.ones((B,C,V), device=z.device)*math.sqrt(dt))
             return noise
-        elif self.training:
+        else:
             return torch.normal(torch.zeros_like(z, device=z.device), \
                             torch.ones_like(z, device=z.device)*math.sqrt(dt))
-        else:
-            return torch.zeros_like(z, device=z.device)
 
     def set_n_sample(self, n):
         self.n_sample = n
@@ -224,7 +226,7 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 dct=True, T=64, n_step=1, dilation=1, pooling="None", SAGC_proj=True, n_sample=1, sigma=None):
+                 dct=True, T=64, n_step=1, dilation=1, temporal_pooling="None", spatial_pooling="None", SAGC_proj=True, n_sample=1, sigma=None):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
@@ -282,12 +284,17 @@ class InfoGCN(nn.Module):
 
         self.classifier = nn.Conv1d(base_channel, num_class, 1)
 
-        if pooling == "max":
-            self.pooling = cum_max_pooling
-        elif pooling == "mean":
-            self.pooling = cum_mean_pooling
-        elif pooling == "None":
-            self.pooling = identity
+        if temporal_pooling == "max":
+            self.temporal_pooling = cum_max_pooling
+        elif temporal_pooling == "mean":
+            self.temporal_pooling = cum_mean_pooling
+        elif temporal_pooling == "None":
+            self.temporal_pooling = identity
+
+        if spatial_pooling == "max":
+            self.spatial_pooling = max_pooling
+        elif spatial_pooling == "mean":
+            self.spatial_pooling = torch.mean
 
         # self.zero_embed = nn.Parameter(torch.randn(2*base_channel, 25))
 
@@ -339,8 +346,9 @@ class InfoGCN(nn.Module):
 
         # classification
         z_cls = self.cls_decoder(z_cls)
-        z_cls = rearrange(z_cls, '(n m l) c t v -> (n l) m c t v', m=M, l=self.n_sample).mean(-1).mean(1) # N, 2*D, T
-        z_cls = self.pooling(z_cls, self.arange.to(z_cls.device), dim=-1)
+        z_cls = rearrange(z_cls, '(n m l) c t v -> (n l) m c t v', m=M, l=self.n_sample).mean(1) # N, 2*D, T
+        z_cls = self.spatial_pooling(z_cls,dim=-1)
+        z_cls = self.temporal_pooling(z_cls, self.arange.to(z_cls.device), dim=-1)
 
         y = self.classifier(z_cls) # N, num_cls, T
         y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
