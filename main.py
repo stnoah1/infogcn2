@@ -2,6 +2,7 @@
 from __future__ import print_function
 
 import os
+import math
 import time
 import glob
 import wandb
@@ -269,7 +270,7 @@ class Processor():
             value, predict_label = torch.max(y_hat.data, 1)
             for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                 self.log_acc[i].update((predict_label == y.data)\
-                                        .view(N_cls*B,-1)[:,int(T*ratio)-1].float().mean(), B)
+                                        .view(N_cls*B,-1)[:,int(math.ceil(T*ratio))-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
@@ -353,7 +354,7 @@ class Processor():
                     step += 1
                 for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\
-                                           .view(N_cls,B,-1)[N_cls-1,:,int(T*ratio)-1].float().mean(), B)
+                                           .view(N_cls,B,-1)[N_cls-1,:,int(math.ceil(T*ratio))-1].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
                 self.log_kl_div.update(kl_div.data.item(), B)
