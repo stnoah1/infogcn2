@@ -282,7 +282,7 @@ class Processor():
                 self.log_acc[i].update((predict_label == y.data)\
                                         .view(N_cls*B,-1)[:,int(math.ceil(T*ratio))-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
-            self.log_kl_div.update(kl_div.data.item(), B)
+            # self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
 
             tbar.set_description(
