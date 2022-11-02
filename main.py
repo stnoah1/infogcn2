@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-from __future__ import print_function
+#!/usr/bin/env python from __future__ import print_function
 
 import os
 import math
@@ -133,6 +132,7 @@ class Processor():
             sigma=self.arg.sigma,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
+        # self.cls_loss = LabelSmoothingCrossEntropy(self.arg.N_step+1, self.arg.batch_size, self.arg.T).to(self.device)
         self.recon_loss = masked_recon_loss
 
         if self.arg.weights:
@@ -228,12 +228,12 @@ class Processor():
         tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
         for x, y, mask, index in tbar:
-            cls_loss, recon_loss = torch.tensor(0.), torch.tensor(0.)
+            cls_loss, recon_loss, feature_loss = torch.tensor(0.), torch.tensor(0.), torch.tensor(0.)
             B, C, T, V, M = x.shape;
             x = x.float().to(self.device)
             y = y.long().to(self.device)
             mask = mask.long().to(self.device)
-            y_hat, x_hat, kl_div = self.model(x)
+            y_hat, x_hat, feature = self.model(x)
 
             if self.arg.lambda_1:
                 N_cls = y_hat.size(0)//B
@@ -253,7 +253,17 @@ class Processor():
                 mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
                 recon_loss = self.arg.lambda_2 * self.recon_loss(x_hat, x_gt, mask_recon)
 
-            loss = cls_loss + recon_loss + self.arg.lambda_3*kl_div
+            if self.arg.lambda_3:
+                N_feature = feature.size(0)//B
+                z_0 = feature[:1].expand(N_feature, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
+                z_hat = feature[1:]
+                mask_feature = repeat(mask, 'b c t v m -> n b c t v m', n=N_feature-1)
+                for i in range(N_feature-1):
+                    mask_recon[i,:,:,:i+1,:,:] = 0.
+                mask_feature = rearrange(mask_feature, 'n b c t v m -> (n b) c t v m')
+                feature_loss = self.arg.lambda_3 * self.recon_loss(z_0, feature[1:], mask_recon)
+
+            loss = cls_loss + recon_loss + feature_loss
 
             # backward
             self.optimizer.zero_grad()

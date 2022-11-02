@@ -77,6 +77,8 @@ class Euler(nn.Module):
         z_cls = torch.cat(z_lst, dim=0) # n-step*b, c, t, v
         return z_shift_lst, z_cls
 
+    def set_n_step(self, n_step):
+        self.n_step = n_step
 
 class RK4(nn.Module):
     def __init__(self, ode_func, T, n_step, dilation):
@@ -298,6 +300,8 @@ class InfoGCN(nn.Module):
 
         # self.zero_embed = nn.Parameter(torch.randn(2*base_channel, 25))
 
+    def set_n_step(self, n_step):
+        self.n_step_ode.set_n_step(n_step)
 
     def KL_div(self, fp_mu, fp_std, kl_coef=1):
         fp_distr = Normal(fp_mu, fp_std)
@@ -352,4 +356,4 @@ class InfoGCN(nn.Module):
 
         y = self.classifier(z_cls) # N, num_cls, T
         y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
-        return y, x_hat, torch.tensor(0.)
+        return y, x_hat, torch.tensor(0.), z_shift_lst

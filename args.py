@@ -84,6 +84,7 @@ def get_parser():
 
     # ODE
     parser.add_argument('--n_step', type=int, default=1, help='')
+    parser.add_argument('--N', type=int, default=1, help='')
     parser.add_argument('--dilation', type=int, default=1, help='')
     parser.add_argument('--ode_method', type=str, default="euler", help='')
 

@@ -48,6 +48,24 @@ class CosineSimilarity(nn.Module):
         return  self.loss(pred, gt).mean(1).mean(0)
 
 
+class AdaptiveLabelSmoothingCrossEntropy(nn.Module):
+    def __init__(self, N, B, T, st=0.1, ed=0.9):
+        super(AdaptiveLabelSmoothingCrossEntropy, self).__init__()
+        self.smoothing = torch.linspace(st, ed, T).unsqueeze(0)
+        self.N = N
+        self.B = B
+        self.T = T
+
+    def forward(self, x, target):
+        confidence = 1. - self.smoothing.to(x.device).to(x.dtype)
+        logprobs = F.log_softmax(x, dim=-1)
+        nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
+        nll_loss = nll_loss.squeeze(1).view(self.N * self.B, self.T)
+        smooth_loss = -logprobs.mean(dim=-1).view(self.N * self.B, self.T)
+        loss = confidence * nll_loss + self.smoothing * smooth_loss
+        return loss.mean()
+
+
 class LabelSmoothingCrossEntropy(nn.Module):
     def __init__(self, smoothing=0.1):
         super(LabelSmoothingCrossEntropy, self).__init__()
@@ -61,6 +79,15 @@ class LabelSmoothingCrossEntropy(nn.Module):
         smooth_loss = -logprobs.mean(dim=-1)
         loss = confidence * nll_loss + self.smoothing * smooth_loss
         return loss.mean()
+
+# def ls_cross_entropy(x, target, st=0.1, ed=0.1):
+        # confidence = torch.zeros()
+        # logprobs = F.log_softmax(x, dim=-1)
+        # nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
+        # nll_loss = nll_loss.squeeze(1)
+        # smooth_loss = -logprobs.mean(dim=-1)
+        # loss = confidence * nll_loss + smoothing * smooth_loss
+        # return loss.mean()
 
 
 def feature_transform_reguliarzer(trans):
