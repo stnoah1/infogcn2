@@ -21,7 +21,7 @@ import numpy as np
 from tqdm import tqdm
 
 from args import get_parser
-from loss import LabelSmoothingCrossEntropy, masked_recon_loss
+from loss import LabelSmoothingCrossEntropy, AdaptiveLabelSmoothingCrossEntropy, masked_recon_loss
 from model.infogcn import InfoGCN
 from utils import AverageMeter, import_class
 from einops import rearrange, repeat
@@ -131,8 +131,8 @@ class Processor():
             SAGC_proj=self.arg.SAGC_proj,
             sigma=self.arg.sigma,
         )
-        self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
-        # self.cls_loss = LabelSmoothingCrossEntropy(self.arg.N_step+1, self.arg.batch_size, self.arg.T).to(self.device)
+        # self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
+        self.cls_loss = AdaptiveLabelSmoothingCrossEntropy(self.arg.n_step+1, self.arg.batch_size, self.arg.window_size).to(self.device)
         self.recon_loss = masked_recon_loss
 
         if self.arg.weights:
@@ -282,14 +282,14 @@ class Processor():
                 self.log_acc[i].update((predict_label == y.data)\
                                         .view(N_cls*B,-1)[:,int(math.ceil(T*ratio))-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
-            self.log_kl_div.update(kl_div.data.item(), B)
+            # self.log_kl_div.update(kl_div.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
 
             tbar.set_description(
                 f"[Epoch #{epoch}] "\
                 f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
-                f"KL:{self.log_kl_div.avg:.3f}, " \
+                # f"KL:{self.log_kl_div.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
             )
         train_dict = {
@@ -309,7 +309,7 @@ class Processor():
         self.model.eval()
         [self.log_acc[i].reset() for i in range(10)]
         self.log_cls_loss.reset()
-        self.log_kl_div.reset()
+        # self.log_kl_div.reset()
         self.log_recon_loss.reset()
         self.log_recon_2d_loss.reset()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
@@ -330,7 +330,7 @@ class Processor():
                     mask = mask.long().to(self.device)
                     x_gt = x
 
-                    y_hat, x_hat, kl_div = self.model(x)
+                    y_hat, x_hat, feature_loss = self.model(x)
                     N_cls = y_hat.size(0)//B
                     # pred_list.append(y_hat.view(N_cls,B,-1).detach().cpu().numpy())
                     y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
@@ -367,13 +367,13 @@ class Processor():
                                            .view(N_cls,B,-1)[N_cls-1,:,int(math.ceil(T*ratio))-1].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
-                self.log_kl_div.update(kl_div.data.item(), B)
+                # self.log_kl_div.update(kl_div.data.item(), B)
 
                 tbar.set_description(
                     f"[Epoch #{epoch}] "\
                     f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
                     f"CLS:{self.log_cls_loss.avg:.3f}, " \
-                    f"KL:{self.log_kl_div.avg:.3f}, " \
+                    # f"KL:{self.log_kl_div.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 )
 

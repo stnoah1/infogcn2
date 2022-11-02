@@ -49,7 +49,7 @@ class CosineSimilarity(nn.Module):
 
 
 class AdaptiveLabelSmoothingCrossEntropy(nn.Module):
-    def __init__(self, N, B, T, st=0.1, ed=0.9):
+    def __init__(self, N, B, T, st=0.9, ed=0.1):
         super(AdaptiveLabelSmoothingCrossEntropy, self).__init__()
         self.smoothing = torch.linspace(st, ed, T).unsqueeze(0)
         self.N = N
@@ -57,12 +57,13 @@ class AdaptiveLabelSmoothingCrossEntropy(nn.Module):
         self.T = T
 
     def forward(self, x, target):
-        confidence = 1. - self.smoothing.to(x.device).to(x.dtype)
+        confidence = 1. - self.smoothing
         logprobs = F.log_softmax(x, dim=-1)
         nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
         nll_loss = nll_loss.squeeze(1).view(self.N * self.B, self.T)
         smooth_loss = -logprobs.mean(dim=-1).view(self.N * self.B, self.T)
-        loss = confidence * nll_loss + self.smoothing * smooth_loss
+        loss = confidence.to(x.device).to(x.dtype) * nll_loss +\
+            self.smoothing.to(x.device).to(x.dtype) * smooth_loss
         return loss.mean()
 
 
