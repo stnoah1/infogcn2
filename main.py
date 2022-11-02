@@ -132,7 +132,7 @@ class Processor():
             sigma=self.arg.sigma,
         )
         # self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
-        self.cls_loss = AdaptiveLabelSmoothingCrossEntropy(self.arg.n_step+1, self.arg.batch_size, self.arg.window_size).to(self.device)
+        self.cls_loss = AdaptiveLabelSmoothingCrossEntropy(self.arg.n_step, self.arg.window_size).to(self.device)
         self.recon_loss = masked_recon_loss
 
         if self.arg.weights:
