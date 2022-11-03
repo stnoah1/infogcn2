@@ -40,9 +40,9 @@ class DiffeqSolver(nn.Module):
         pred_y = odeint(self.ode_func, first_point, time_steps_to_predict,
                         rtol=self.odeint_rtol, atol=self.odeint_atol,
                         method=self.ode_method)
-        pred_y = rearrange(pred_y, 't b c e v -> b c t v e').squeeze()
+        # pred_y = rearrange(pred_y, 'n (b t) c v -> n b t c v').squeeze()
 
-        # b c t v
+        # n (b t) c v
         return pred_y
 
 
@@ -186,8 +186,8 @@ class ODEFunc(nn.Module):
         self.temporal_pe = self.init_pe(3*T+1, dim)
         self.index = torch.arange(0, 3*T, 3).unsqueeze(-1).expand(T, dim)
 
-    def forward(self, x, t=0, backwards=False):
-        x = self.add_pe(x, t) # TODO T dimension wise.
+    def forward(self, t, x, backwards=False):
+        # x = self.add_pe(x, t) # TODO T dimension wise.
         x = torch.einsum('vu,ncu->ncv', self.A.to(x.device).to(x.dtype), x)
         x = self.conv1(x)
         x = self.relu(x)
@@ -245,6 +245,11 @@ class InfoGCN(nn.Module):
         self.A_vector = self.get_A(k)
         self.to_joint_embedding = nn.Linear(in_channels, base_channel)
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
+        shift_idx = torch.arange(0, T, dtype=int).view(1,T,1,1)
+        shift_idx = repeat(shift_idx, 'b t c v -> n b t c v', n=n_step)
+        shift_idx = shift_idx - torch.arange(1, n_step+1, dtype=int).view(n_step,1,1,1,1)
+        self.mask = torch.triu(torch.ones(n_step, T)).view(n_step,1,T,1,1)
+        self.shift_idx = shift_idx%T
         # self.data_bn = nn.BatchNorm1d(base_channel)
         # bn_init(self.data_bn, 1)
         self.temporal_encoder = TemporalEncoder(
@@ -260,18 +265,21 @@ class InfoGCN(nn.Module):
             SAGC_proj=SAGC_proj
         )
         self.n_sample = n_sample
+        self.n_step = n_step
+        self.arange_n_step = torch.arange(self.n_step+1)
 
-        # self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
-        if method == "sde":
-            mu = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
-            sigma = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device) if sigma is None else lambda x: sigma
-            self.n_step_ode = SDE(mu, sigma, T=T, n_step=n_step, dilation=dilation)
-        elif method == "rk4":
-            ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
-            self.n_step_ode = RK4(ode_func, T=T, n_step=n_step, dilation=dilation)
-        elif method == "euler":
-            ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
-            self.n_step_ode = Euler(ode_func, T=T, n_step=n_step, dilation=dilation)
+        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
+        self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
+        # if method == "sde":
+            # mu = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
+            # sigma = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device) if sigma is None else lambda x: sigma
+            # self.n_step_ode = SDE(mu, sigma, T=T, n_step=n_step, dilation=dilation)
+        # elif method == "rk4":
+            # ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
+            # self.n_step_ode = RK4(ode_func, T=T, n_step=n_step, dilation=dilation)
+        # elif method == "euler":
+            # ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
+            # self.n_step_ode = Euler(ode_func, T=T, n_step=n_step, dilation=dilation)
 
         self.recon_decoder = nn.Sequential(
             GCN(base_channel, base_channel, A),
@@ -315,6 +323,50 @@ class InfoGCN(nn.Module):
         loss = kldiv_z0.mean()
         return loss
 
+    def extrapolate(self, z_0, t):
+        '''
+        z : n c t v
+        '''
+        B, C, T, V = z_0.size()
+        z_0 = rearrange(z_0, "b c t v -> (b t) c v")
+
+        zs = self.diffeq_solver(z_0, t) # z_i = 2, (b t), c, v
+        zs = rearrange(zs, 'n (b t) c v -> n b t c v', t=T)
+        z_hat = zs[1:]
+        z_hat = torch.gather(z_hat, dim=2, index=self.shift_idx.expand_as(z_hat).to(z_hat.device).long())
+        z_hat = self.mask.to(z_hat.device) * z_hat
+        z_hat = rearrange(z_hat, 'n b t c v -> (n b) c t v')
+        z_0 = rearrange(z_0, '(b t) c v -> b c t v', t=T)
+
+        # z_hat_i = rearrange(z_i[-1].clone(), "(b t) c v -> b c t v", b=B) # 2, (b t), c, v
+        # z_hat_i = torch.gather(z_hat_i, dim=2, index=(shift_tensor-i)%T)
+        # z_hat_i[:,:,:i+1,:] = 0
+
+        # z_hat = torch.cat(z_hat, dim=0)
+        # AR pred
+        return z_0, z_hat
+
+    def origin_extrapolate(self, z, t):
+        '''
+        z : n c t v m
+        '''
+        if self.training:
+            z_hat = []
+            for i in range(self.N+1):
+                z_i = self.diffeq_solver(z, t[:2])
+                z_hat = z_hat.append(z_i[-1])
+            z_hat = torch.cat(z_hat, dim=0)
+            # AR pred
+            z_0 = z[:, :, self.obs-1:self.obs, :, :]
+        else:
+            z_hat = z[:, :, :self.obs, :, :]
+
+        z_0 = z[:, :, self.obs-1:self.obs, :, :]
+        z_pred = self.diffeq_solver(z_0, t[:self.obs+1])
+        z_hat = torch.cat((z_hat, z_pred), dim=0)
+
+        return z_hat
+
     def get_A(self, k):
         A_outward = self.Graph.A_outward_binary
         I = np.eye(self.Graph.num_node)
@@ -342,18 +394,18 @@ class InfoGCN(nn.Module):
         # z = z_mu
 
         # extrapolation
-        z_shift_lst, z_cls = self.n_step_ode(z)
+        z_0, z_hat= self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
 
         # reconstruction
-        x_hat = self.recon_decoder(z_shift_lst)
+        x_hat = self.recon_decoder(z_hat)
         x_hat = rearrange(x_hat, '(n m l) c t v -> n l c t v m', m=M, l=self.n_sample).mean(1)
 
         # classification
-        z_cls = self.cls_decoder(z_cls)
+        z_cls = self.cls_decoder(z_0)
         z_cls = rearrange(z_cls, '(n m l) c t v -> (n l) m c t v', m=M, l=self.n_sample).mean(1) # N, 2*D, T
         z_cls = self.spatial_pooling(z_cls,dim=-1)
         z_cls = self.temporal_pooling(z_cls, self.arange.to(z_cls.device), dim=-1)
 
         y = self.classifier(z_cls) # N, num_cls, T
         y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
-        return y, x_hat, z_shift_lst
+        return y, x_hat, z_0, z_hat

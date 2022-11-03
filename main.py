@@ -61,7 +61,7 @@ class Processor():
         self.log_recon_2d_loss = AverageMeter()
         self.log_cls_loss = AverageMeter()
         self.log_acc = [AverageMeter() for _ in range(10)]
-        self.log_kl_div = AverageMeter()
+        self.log_feature_loss = AverageMeter()
 
         model = self.model.to(self.device)
         if self.arg.half:
@@ -219,7 +219,7 @@ class Processor():
         self.model.train()
         [self.log_acc[i].reset() for i in range(10)]
         self.log_cls_loss.reset()
-        self.log_kl_div.reset()
+        self.log_feature_loss.reset()
         self.log_recon_loss.reset()
         self.log_recon_2d_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
@@ -233,7 +233,7 @@ class Processor():
             x = x.float().to(self.device)
             y = y.long().to(self.device)
             mask = mask.long().to(self.device)
-            y_hat, x_hat, feature = self.model(x)
+            y_hat, x_hat, z_0, z_hat = self.model(x)
 
             if self.arg.lambda_1:
                 N_cls = y_hat.size(0)//B
@@ -254,14 +254,12 @@ class Processor():
                 recon_loss = self.arg.lambda_2 * self.recon_loss(x_hat, x_gt, mask_recon)
 
             if self.arg.lambda_3:
-                N_feature = feature.size(0)//B
-                z_0 = feature[:1].expand(N_feature, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
-                z_hat = feature[1:]
-                mask_feature = repeat(mask, 'b c t v m -> n b c t v m', n=N_feature-1)
-                for i in range(N_feature-1):
-                    mask_recon[i,:,:,:i+1,:,:] = 0.
-                mask_feature = rearrange(mask_feature, 'n b c t v m -> (n b) c t v m')
-                feature_loss = self.arg.lambda_3 * self.recon_loss(z_0, feature[1:], mask_recon)
+                N_step = self.arg.n_step
+                B_,C,T,V = z_0.shape
+                z_0 = repeat(z_0, 'b c t v-> n b c t v', n=N_step)
+                mask_feature = (z_hat == 0.)
+                z_hat = z_hat.view(N_step, B_, C, T, V)
+                feature_loss = self.arg.lambda_3 * self.recon_loss(z_hat, z_0, mask_feature)
 
             loss = cls_loss + recon_loss + feature_loss
 
@@ -282,19 +280,20 @@ class Processor():
                 self.log_acc[i].update((predict_label == y.data)\
                                         .view(N_cls*B,-1)[:,int(math.ceil(T*ratio))-1].float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
-            # self.log_kl_div.update(kl_div.data.item(), B)
+            self.log_feature_loss.update(feature_loss.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
 
             tbar.set_description(
                 f"[Epoch #{epoch}] "\
                 f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
-                f"KL:{self.log_kl_div.avg:.3f}, " \
+                f"FT:{self.log_feature_loss.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
             )
         train_dict = {
             "train/Recon2D_loss":self.log_recon_loss.avg,
-            "train/cls_loss":self.log_cls_loss.avg
+            "train/cls_loss":self.log_cls_loss.avg,
+            "train/feature_loss":self.log_feature_loss.avg,
         }
         train_dict.update({f"train/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
         wandb.log(train_dict)
@@ -309,7 +308,7 @@ class Processor():
         self.model.eval()
         [self.log_acc[i].reset() for i in range(10)]
         self.log_cls_loss.reset()
-        self.log_kl_div.reset()
+        self.log_feature_loss.reset()
         self.log_recon_loss.reset()
         self.log_recon_2d_loss.reset()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
@@ -330,31 +329,30 @@ class Processor():
                     mask = mask.long().to(self.device)
                     x_gt = x
 
-                    y_hat, x_hat, kl_div = self.model(x)
+                    y_hat, x_hat, z_0, z_hat = self.model(x)
                     N_cls = y_hat.size(0)//B
                     # pred_list.append(y_hat.view(N_cls,B,-1).detach().cpu().numpy())
                     y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
                     y_hat = rearrange(y_hat, "b i t -> (b t) i")
                     cls_loss = self.cls_loss(y_hat, y)
-                    if self.arg.dct:
-                        x_hat_ = rearrange(x_hat, 'b c t v m -> b c v m t')
-                        x_gt_ = rearrange(x_gt, 'b c t v m -> b c v m t')
-                        mask_ = rearrange(mask.detach().clone(), 'b c t v m -> b c v m t')
-                        mask_[:,:,:,:,self.arg.dct_order:] = 0.
-                        x_hat_dct = dct.dct(x_hat_)
-                        x_gt_dct = dct.dct(x_gt_)
-                        recon_loss = self.recon_loss(x_hat_dct, x_gt_dct, mask_)
-                    else:
-                        N_rec = x_hat.size(0)//B
-                        x_gt = x.unsqueeze(0).expand(N_rec, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
-                        mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec)
-                        for i in range(N_rec):
-                            if N_rec == self.arg.n_step:
-                                mask_recon[i,:,:,:i+1,:,:] = 0.
-                            else:
-                                mask_recon[i,:,:,:i,:,:] = 0.
-                        mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
-                        recon_loss = self.recon_loss(x_hat, x_gt, mask_recon)
+                    N_rec = x_hat.size(0)//B
+                    x_gt = x.unsqueeze(0).expand(N_rec, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
+                    mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec)
+                    for i in range(N_rec):
+                        if N_rec == self.arg.n_step:
+                            mask_recon[i,:,:,:i+1,:,:] = 0.
+                        else:
+                            mask_recon[i,:,:,:i,:,:] = 0.
+                    mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
+                    recon_loss = self.recon_loss(x_hat, x_gt, mask_recon)
+
+                    N_step = self.arg.n_step
+                    B_,C,T,V = z_0.shape
+                    z_0 = repeat(z_0, 'b c t v-> n b c t v', n=N_step)
+                    mask_feature = (z_hat == 0.)
+                    z_hat = z_hat.view(N_step, B_, C, T, V)
+                    feature_loss = self.arg.lambda_3 * self.recon_loss(z_0, z_hat, mask_feature)
+
                     loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss
                     score_frag.append(y_hat.data.cpu().numpy())
                     loss_value.append(loss.data.item())
@@ -367,19 +365,20 @@ class Processor():
                                            .view(N_cls,B,-1)[N_cls-1,:,int(math.ceil(T*ratio))-1].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
-                self.log_kl_div.update(kl_div.data.item(), B)
+                self.log_feature_loss.update(feature_loss.data.item(), B)
 
                 tbar.set_description(
                     f"[Epoch #{epoch}] "\
                     f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
                     f"CLS:{self.log_cls_loss.avg:.3f}, " \
-                    f"KL:{self.log_kl_div.avg:.3f}, " \
+                    f"FT:{self.log_feature_loss.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 )
 
             eval_dict = {
                 "eval/Recon2D_loss":self.log_recon_loss.avg,
-                "eval/cls_loss":self.log_cls_loss.avg
+                "eval/cls_loss":self.log_cls_loss.avg,
+                "eval/feature_loss":self.log_feature_loss.avg
             }
             eval_dict.update({f"eval/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
             wandb.log(eval_dict)
