@@ -288,11 +288,11 @@ class InfoGCN(nn.Module):
         )
 
         self.cls_decoder = nn.Sequential(
-            GCN(base_channel, base_channel, A),
-            GCN(base_channel, base_channel, A),
+            GCN(base_channel*(n_step+1), base_channel*(n_step+1)//2, A),
+            GCN(base_channel*(n_step+1)//2, base_channel*(n_step+1)//2, A),
         )
 
-        self.classifier = nn.Conv1d(base_channel, num_class, 1)
+        self.classifier = nn.Conv1d(base_channel*(n_step+1)//2, num_class, 1)
 
         if temporal_pooling == "max":
             self.temporal_pooling = cum_max_pooling
@@ -401,7 +401,8 @@ class InfoGCN(nn.Module):
         x_hat = rearrange(x_hat, '(n m l) c t v -> n l c t v m', m=M, l=self.n_sample).mean(1)
 
         # classification
-        z_cls = self.cls_decoder(z_0)
+        z_hat_cls = rearrange(z_hat, '(n b) c t v -> b (n c) t v', n=self.n_step)
+        z_cls = self.cls_decoder(torch.cat([z_0, z_hat_cls], dim=1))
         z_cls = rearrange(z_cls, '(n m l) c t v -> (n l) m c t v', m=M, l=self.n_sample).mean(1) # N, 2*D, T
         z_cls = self.spatial_pooling(z_cls,dim=-1)
         z_cls = self.temporal_pooling(z_cls, self.arange.to(z_cls.device), dim=-1)
