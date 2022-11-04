@@ -58,6 +58,7 @@ def get_parser():
     parser.add_argument('--dct', type=str2bool, default=False, help='')
     parser.add_argument('--temporal_pooling', type=str, default="None", help='')
     parser.add_argument('--spatial_pooling', type=str, default="mean", help='')
+    parser.add_argument('--z_pooling', type=str, default="None", help='')
     parser.add_argument('--n_sample', type=int, default="1", help='')
     parser.add_argument('--SAGC_proj', type=str2bool, default=True, help='')
     parser.add_argument('--sigma', type=float, default=None, help='')

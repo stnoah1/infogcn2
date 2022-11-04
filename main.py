@@ -58,6 +58,7 @@ class Processor():
         self.best_acc = 0
         self.best_acc_epoch = 0
         self.log_recon_loss = AverageMeter()
+        self.log_auc = AverageMeter()
         self.log_recon_2d_loss = AverageMeter()
         self.log_cls_loss = AverageMeter()
         self.log_acc = [AverageMeter() for _ in range(10)]
@@ -128,6 +129,7 @@ class Processor():
             dilation=self.arg.dilation,
             temporal_pooling=self.arg.temporal_pooling,
             spatial_pooling=self.arg.spatial_pooling,
+            z_pooling=self.arg.z_pooling,
             SAGC_proj=self.arg.SAGC_proj,
             sigma=self.arg.sigma,
         )
@@ -219,6 +221,7 @@ class Processor():
         self.model.train()
         [self.log_acc[i].reset() for i in range(10)]
         self.log_cls_loss.reset()
+        self.log_auc.reset()
         self.log_feature_loss.reset()
         self.log_recon_loss.reset()
         self.log_recon_2d_loss.reset()
@@ -279,6 +282,8 @@ class Processor():
             for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                 self.log_acc[i].update((predict_label == y.data)\
                                         .view(N_cls*B,-1)[:,int(math.ceil(T*ratio))-1].float().mean(), B)
+            self.log_auc.update((predict_label == y.data)\
+                                .view(N_cls*B,-1).float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_feature_loss.update(feature_loss.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
@@ -294,6 +299,7 @@ class Processor():
             "train/Recon2D_loss":self.log_recon_loss.avg,
             "train/cls_loss":self.log_cls_loss.avg,
             "train/feature_loss":self.log_feature_loss.avg,
+            "train/AUC":self.log_auc.avg,
         }
         train_dict.update({f"train/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
         wandb.log(train_dict)
@@ -310,6 +316,7 @@ class Processor():
         self.log_cls_loss.reset()
         self.log_feature_loss.reset()
         self.log_recon_loss.reset()
+        self.log_auc.reset()
         self.log_recon_2d_loss.reset()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
         for ln in loader_name:
@@ -363,6 +370,8 @@ class Processor():
                 for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\
                                            .view(N_cls,B,-1)[N_cls-1,:,int(math.ceil(T*ratio))-1].float().mean(), B)
+                self.log_auc.update((predict_label == y.data)\
+                                    .view(N_cls,B,-1)[-1,:,:].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
                 self.log_recon_loss.update(recon_loss.data.item(), B)
                 self.log_feature_loss.update(feature_loss.data.item(), B)
@@ -378,7 +387,8 @@ class Processor():
             eval_dict = {
                 "eval/Recon2D_loss":self.log_recon_loss.avg,
                 "eval/cls_loss":self.log_cls_loss.avg,
-                "eval/feature_loss":self.log_feature_loss.avg
+                "eval/feature_loss":self.log_feature_loss.avg,
+                "eval/AUC":self.log_auc.avg,
             }
             eval_dict.update({f"eval/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
             wandb.log(eval_dict)
@@ -431,12 +441,12 @@ class Processor():
                     self.eval(epoch, save_score=self.arg.save_score, loader_name=['test'])
 
             # test the best model
-            weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
-            weights = torch.load(weights_path)
-            self.model.load_state_dict(weights)
+            # weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
+            # weights = torch.load(weights_path)
+            # self.model.load_state_dict(weights)
 
-            self.arg.print_log = False
-            self.eval(epoch=0, save_score=True, loader_name=['test'])
+            # self.arg.print_log = False
+            # self.eval(epoch=0, save_score=True, loader_name=['test'])
             self.arg.print_log = True
 
 

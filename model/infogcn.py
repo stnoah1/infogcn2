@@ -228,7 +228,7 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 dct=True, T=64, n_step=1, dilation=1, temporal_pooling="None", spatial_pooling="None", SAGC_proj=True, n_sample=1, sigma=None):
+                 dct=True, T=64, n_step=1, dilation=1, temporal_pooling="None", spatial_pooling="None", z_pooling="None", SAGC_proj=True, n_sample=1, sigma=None):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
@@ -267,6 +267,7 @@ class InfoGCN(nn.Module):
         self.n_sample = n_sample
         self.n_step = n_step
         self.arange_n_step = torch.arange(self.n_step+1)
+        self.z_pooling = z_pooling
 
         ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
         self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
@@ -286,13 +287,27 @@ class InfoGCN(nn.Module):
             GCN(base_channel, base_channel, A),
             nn.Conv2d(base_channel, 3, 1),
         )
+        if self.z_pooling == None:
+            if n_step in [1,2,3]:
+                in_dim = base_channel*(n_step+1)
+                mid_dim = base_channel*(n_step+1)//2
+                out_dim = base_channel*(n_step+1)//2
+            elif n_step == 0:
+                in_dim = base_channel
+                mid_dim = base_channel
+                out_dim = base_channel
+        else:
+            in_dim = base_channel * 2
+            mid_dim = base_channel
+            out_dim = base_channel
+
 
         self.cls_decoder = nn.Sequential(
-            GCN(base_channel*(n_step+1), base_channel*(n_step+1)//2, A),
-            GCN(base_channel*(n_step+1)//2, base_channel*(n_step+1)//2, A),
+            GCN(in_dim, mid_dim, A),
+            GCN(mid_dim, out_dim, A),
         )
 
-        self.classifier = nn.Conv1d(base_channel*(n_step+1)//2, num_class, 1)
+        self.classifier = nn.Conv1d(out_dim, num_class, 1)
 
         if temporal_pooling == "max":
             self.temporal_pooling = cum_max_pooling
@@ -401,8 +416,18 @@ class InfoGCN(nn.Module):
         x_hat = rearrange(x_hat, '(n m l) c t v -> n l c t v m', m=M, l=self.n_sample).mean(1)
 
         # classification
-        z_hat_cls = rearrange(z_hat, '(n b) c t v -> b (n c) t v', n=self.n_step)
-        z_cls = self.cls_decoder(torch.cat([z_0, z_hat_cls], dim=1))
+        if self.n_step:
+            if self.z_pooling == "mean":
+                z_hat_cls = rearrange(z_hat, '(n b) c t v -> n b c t v', n=self.n_step)
+                z_hat_cls = torch.mean(z_hat_cls, dim=0)
+            elif self.z_pooling == "max":
+                z_hat_cls = rearrange(z_hat, '(n b) c t v -> n b c t v', n=self.n_step)
+                z_hat_cls, _ = torch.max(z_hat_cls, dim=0)
+            elif self.z_pooling == "None":
+                z_hat_cls = rearrange(z_hat, '(n b) c t v -> b (n c) t v', n=self.n_step)
+            z_cls = self.cls_decoder(torch.cat([z_0, z_hat_cls], dim=1))
+        else:
+            z_cls = self.cls_decoder(z_0)
         z_cls = rearrange(z_cls, '(n m l) c t v -> (n l) m c t v', m=M, l=self.n_sample).mean(1) # N, 2*D, T
         z_cls = self.spatial_pooling(z_cls,dim=-1)
         z_cls = self.temporal_pooling(z_cls, self.arange.to(z_cls.device), dim=-1)
