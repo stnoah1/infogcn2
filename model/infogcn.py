@@ -248,7 +248,7 @@ class InfoGCN(nn.Module):
         shift_idx = torch.arange(0, T, dtype=int).view(1,T,1,1)
         shift_idx = repeat(shift_idx, 'b t c v -> n b t c v', n=n_step)
         shift_idx = shift_idx - torch.arange(1, n_step+1, dtype=int).view(n_step,1,1,1,1)
-        self.mask = torch.triu(torch.ones(n_step, T)).view(n_step,1,T,1,1)
+        self.mask = torch.triu(torch.ones(n_step, T), diagonal=1).view(n_step,1,T,1,1)
         self.shift_idx = shift_idx%T
         # self.data_bn = nn.BatchNorm1d(base_channel)
         # bn_init(self.data_bn, 1)
@@ -270,7 +270,7 @@ class InfoGCN(nn.Module):
         self.z_pooling = z_pooling
 
         ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
-        self.diffeq_solver = DiffeqSolver(ode_func, method='rk4')
+        self.diffeq_solver = DiffeqSolver(ode_func, method=method)
         # if method == "sde":
             # mu = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
             # sigma = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device) if sigma is None else lambda x: sigma
@@ -348,8 +348,9 @@ class InfoGCN(nn.Module):
         zs = self.diffeq_solver(z_0, t) # z_i = 2, (b t), c, v
         zs = rearrange(zs, 'n (b t) c v -> n b t c v', t=T)
         z_hat = zs[1:]
-        z_hat = torch.gather(z_hat, dim=2, index=self.shift_idx.expand_as(z_hat).to(z_hat.device).long())
-        z_hat = self.mask.to(z_hat.device) * z_hat
+        z_hat_shifted = torch.gather(z_hat, dim=2, index=self.shift_idx.expand_as(z_hat).to(z_hat.device).long())
+        z_hat_shifted = self.mask.to(z_hat_shifted.device) * z_hat
+        z_hat_shifted = rearrange(z_hat_shifted, 'n b t c v -> (n b) c t v')
         z_hat = rearrange(z_hat, 'n b t c v -> (n b) c t v')
         z_0 = rearrange(z_0, '(b t) c v -> b c t v', t=T)
 
@@ -359,7 +360,7 @@ class InfoGCN(nn.Module):
 
         # z_hat = torch.cat(z_hat, dim=0)
         # AR pred
-        return z_0, z_hat
+        return z_0, z_hat, z_hat_shifted
 
     def origin_extrapolate(self, z, t):
         '''
@@ -409,10 +410,10 @@ class InfoGCN(nn.Module):
         # z = z_mu
 
         # extrapolation
-        z_0, z_hat= self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
+        z_0, z_hat, z_hat_shifted= self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
 
         # reconstruction
-        x_hat = self.recon_decoder(z_hat)
+        x_hat = self.recon_decoder(z_hat_shifted)
         x_hat = rearrange(x_hat, '(n m l) c t v -> n l c t v m', m=M, l=self.n_sample).mean(1)
 
         # classification
