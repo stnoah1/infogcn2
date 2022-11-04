@@ -260,7 +260,7 @@ class Processor():
                 N_step = self.arg.n_step
                 B_,C,T,V = z_0.shape
                 z_0 = repeat(z_0, 'b c t v-> n b c t v', n=N_step)
-                mask_feature = (z_hat == 0.)
+                mask_feature = (z_hat != 0.)
                 z_hat = z_hat.view(N_step, B_, C, T, V)
                 feature_loss = self.arg.lambda_3 * self.recon_loss(z_hat, z_0, mask_feature)
 
