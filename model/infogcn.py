@@ -435,4 +435,4 @@ class InfoGCN(nn.Module):
 
         y = self.classifier(z_cls) # N, num_cls, T
         y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
-        return y, x_hat, z_0, z_hat
+        return y, x_hat, z_0, z_hat_shifted
