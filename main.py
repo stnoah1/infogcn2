@@ -473,9 +473,9 @@ class Processor():
 
 def main():
     # parser arguments
-    wandb.init()
     parser = get_parser()
     arg = parser.parse_args()
+    wandb.init(project=arg.project)
     arg.work_dir = wandb.run.dir
     wandb.config.update(arg)
     init_seed(arg.seed)

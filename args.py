@@ -15,6 +15,7 @@ def get_parser():
     parser.add_argument('--log_dir', type=str, default='.', help='')
     parser.add_argument('--model_saved_name', default='')
     parser.add_argument('--noise_ratio', type=float, default=0.5, help='')
+    parser.add_argument('--project', type=str, default='SODE', help='')
 
     # data
     parser.add_argument('--n_desired', type=int, default=40000, help='')

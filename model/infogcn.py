@@ -288,7 +288,7 @@ class InfoGCN(nn.Module):
             nn.Conv2d(base_channel, 3, 1),
         )
         if self.z_pooling == "None":
-            if n_step in [1,2,3]:
+            if n_step:
                 in_dim = base_channel*(n_step+1)
                 mid_dim = base_channel*(n_step+1)//2
                 out_dim = base_channel*(n_step+1)//2
