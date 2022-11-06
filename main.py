@@ -132,6 +132,7 @@ class Processor():
             z_pooling=self.arg.z_pooling,
             SAGC_proj=self.arg.SAGC_proj,
             sigma=self.arg.sigma,
+            backbone=self.arg.backbone,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         # self.cls_loss = LabelSmoothingCrossEntropy(self.arg.N_step+1, self.arg.batch_size, self.arg.T).to(self.device)

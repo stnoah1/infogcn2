@@ -228,7 +228,8 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 dct=True, T=64, n_step=1, dilation=1, temporal_pooling="None", spatial_pooling="None", z_pooling="None", SAGC_proj=True, n_sample=1, sigma=None):
+                 dct=True, T=64, n_step=1, dilation=1, temporal_pooling="None", spatial_pooling="None",
+                 z_pooling="None", SAGC_proj=True, n_sample=1, sigma=None, backbone='transformer'):
         super(InfoGCN, self).__init__()
 
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
@@ -263,7 +264,7 @@ class InfoGCN(nn.Module):
             A=A,
             num_point=num_point,
             SAGC_proj=SAGC_proj
-        )
+        ) if backbone == "transformer" else Encoder_z0_RNN(base_channel, A, device)
         self.n_sample = n_sample
         self.n_step = n_step
         self.arange_n_step = torch.arange(self.n_step+1)

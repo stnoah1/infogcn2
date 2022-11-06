@@ -91,12 +91,12 @@ class Encoder_z0_RNN(nn.Module):
 
         self.hiddens_to_z0 = nn.Sequential(
             SA_GC(self.latent_dim, self.latent_dim, A),
-            SA_GC(self.latent_dim, 2*self.latent_dim, A),
+            SA_GC(self.latent_dim, self.latent_dim, A),
         )
 
         self.sagc_lstm =  SAGC_LSTM(
-            input_dim=self.latent_dim, hidden_dims=[self.latent_dim*2, self.latent_dim],
-            n_layers=2, A=A, device=device
+            input_dim=self.latent_dim, hidden_dims=[self.latent_dim, self.latent_dim],
+            n_layers=2, A=A
         )
 
 
@@ -106,22 +106,18 @@ class Encoder_z0_RNN(nn.Module):
         B, C, T, V = data.shape
 
         time_set = list(range(T))
-
+        zs = []
         if run_backwards:
             time_set = time_set[::-1]
 
         assert(not torch.isnan(data).any())
         for i, idx in enumerate(time_set):
             _, output = self.sagc_lstm(data[:,:,idx:idx+1,:], (i==0))
+            zs.append(output[-1])
         # LSTM output shape: (seq_len, batch, num_directions * hidden_size)
 
-        z0 = self.hiddens_to_z0(output[-1])
-        mean, std = torch.split(z0, C, dim=1)
-        std = std.abs() + 1e-6
-        assert(not torch.isnan(mean).any())
-        assert(not torch.isnan(std).any())
-
-        return mean, std
+        z0 = torch.cat(zs, dim=2)
+        return z0
 
 class RNN(nn.Module):
     def __init__(self, latent_dim, A, n_step):
