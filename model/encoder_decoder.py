@@ -41,14 +41,13 @@ class SAGC_LSTM_Cell(nn.Module):
 
 
 class SAGC_LSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dims, n_layers, A, device):
+    def __init__(self, input_dim, hidden_dims, n_layers, A):
         super(SAGC_LSTM, self).__init__()
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.n_layers = n_layers
         self.H, self.C = [],[]
         self.num_joint = A.shape[1]
-        self.device = device
 
         cell_list = []
         for i in range(0, self.n_layers):
@@ -65,17 +64,17 @@ class SAGC_LSTM(nn.Module):
 
         for j,cell in enumerate(self.cell_list):
             if j==0: # bottom layer
-                self.H[j], self.C[j] = cell(input_, (self.H[j],self.C[j]))
+                self.H[j], self.C[j] = cell(input_, (self.H[j].to(input_.device),self.C[j].to(input_.device)))
             else:
-                self.H[j], self.C[j] = cell(self.H[j-1],(self.H[j],self.C[j]))
+                self.H[j], self.C[j] = cell(self.H[j-1].to(input_.device),(self.H[j].to(input_.device),self.C[j].to(input_.device)))
 
         return (self.H,self.C) , self.H   # (hidden, output)
 
     def initHidden(self,batch_size):
         self.H, self.C = [],[]
         for i in range(self.n_layers):
-            self.H.append(torch.zeros(batch_size, self.hidden_dims[i], 1, self.num_joint).to(self.device))
-            self.C.append(torch.zeros(batch_size, self.hidden_dims[i], 1, self.num_joint).to(self.device))
+            self.H.append(torch.zeros(batch_size, self.hidden_dims[i], 1, self.num_joint))
+            self.C.append(torch.zeros(batch_size, self.hidden_dims[i], 1, self.num_joint))
 
     def setHidden(self, hidden):
         H,C = hidden
@@ -123,3 +122,35 @@ class Encoder_z0_RNN(nn.Module):
         assert(not torch.isnan(std).any())
 
         return mean, std
+
+class RNN(nn.Module):
+    def __init__(self, latent_dim, A, n_step):
+
+        super(RNN, self).__init__()
+
+        self.latent_dim = latent_dim
+
+        self.N = n_step
+
+        self.sagc_lstm =  SAGC_LSTM(
+            input_dim=self.latent_dim, hidden_dims=[self.latent_dim, self.latent_dim],
+            n_layers=2, A=A
+        )
+
+
+    def forward(self, z0, time):
+        # data : B C T V
+
+        BT, C, V = z0.shape
+        z0 = z0.unsqueeze(2)
+
+        time_set = list(range(self.N))
+        zs = [z0]
+        assert(not torch.isnan(z0).any())
+        for i, idx in enumerate(time_set):
+            _, output = self.sagc_lstm(z0, (i==0))
+            zs.append(output[-1])
+        # LSTM output shape: (seq_len, batch, num_directions * hidden_size)
+        zs = torch.stack(zs, dim=0)
+        zs = zs.squeeze(3)
+        return zs

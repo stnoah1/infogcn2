@@ -12,7 +12,7 @@ from einops import rearrange
 from model.modules import EncodingBlock, SA_GC, TemporalEncoder, GCN
 from model.utils import bn_init, import_class, sample_standard_gaussian,\
     cum_mean_pooling, cum_max_pooling, identity, max_pooling
-from model.encoder_decoder import Encoder_z0_RNN
+from model.encoder_decoder import Encoder_z0_RNN, RNN
 
 from einops import rearrange, repeat
 from torchdiffeq import odeint as odeint
@@ -270,7 +270,8 @@ class InfoGCN(nn.Module):
         self.z_pooling = z_pooling
 
         ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
-        self.diffeq_solver = DiffeqSolver(ode_func, method=method)
+        self.diffeq_solver = DiffeqSolver(ode_func, method=method) if method != "RNN" else \
+            RNN(base_channel, A, n_step)
         # if method == "sde":
             # mu = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=T).to(device)
             # sigma = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), T=64).to(device) if sigma is None else lambda x: sigma
@@ -410,7 +411,7 @@ class InfoGCN(nn.Module):
         # z = z_mu
 
         # extrapolation
-        z_0, z_hat, z_hat_shifted= self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
+        z_0, z_hat, z_hat_shifted = self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
 
         # reconstruction
         x_hat = self.recon_decoder(z_hat_shifted)
