@@ -389,3 +389,5 @@ class TemporalEncoder(nn.Module):
         x = rearrange(x, '(b v) t c -> b c t v', v=V)
         return x[:,:C,:,:]
 
+    def get_attention(self):
+        return self.transformer._attns
