@@ -370,10 +370,10 @@ class Processor():
             y_hat_0 = torch.argmax(pred, dim=3)[:,:,-1]
             corrects_origin = (y_hat_0 == label_list.unsqueeze(1)).sum(0)
             diff, corrects_agree = agreement(new_array, pred_list, label_list, corrects_origin, alpha, T)
-            attention = self.model.get_attention()
+            attention = torch.cat(self.model.get_attention())
             pred = pred # B, T, N, Cls
 
-            with open('pred_lst_cat.pkl', 'wb') as f:
+            with open('pred_lst_ucla_n3.pkl', 'wb') as f:
                 pickle.dump(pred_list.detach().cpu().numpy(), f)
             with open('label_list.pkl', 'wb') as f:
                 pickle.dump(label_list.detach().cpu().numpy(), f)
@@ -394,7 +394,7 @@ class Processor():
         self.print_log(f'# Parameters: {count_parameters(self.model)/10**6:.3f}M')
         # alpha = self.train(0)
         # alpha = 0.94
-        self.eval(0, alpha=alpha)
+        self.eval(0, alpha=0)
 
 def main():
     # parser arguments
