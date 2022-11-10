@@ -107,7 +107,7 @@ class Processor():
             batch_size=self.arg.test_batch_size,
             shuffle=False,
             num_workers=self.arg.num_worker,
-            drop_last=False,
+            drop_last=True,
             pin_memory=True,
             worker_init_fn=init_seed)
 

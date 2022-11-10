@@ -325,60 +325,69 @@ class Processor():
             score_frag = []
             label_list = []
             pred_list = []
+            attention_list = []
+            input_lst = []
             step = 0
             tbar = tqdm(self.data_loader[ln], dynamic_ncols=True)
-            for x, y, mask, index in tbar:
-                with torch.no_grad():
-                    label_list.append(y)
-                    B, C, T, V, M = x.shape
-                    x = x.float().to(self.device)
-                    y = y.long().to(self.device)
-                    mask = mask.long().to(self.device)
-                    x_gt = x
+            for i, (x, y, mask, index) in enumerate(tbar):
+                if i > 15:
+                    with torch.no_grad():
+                        label_list.append(y.detach().cpu())
+                        B, C, T, V, M = x.shape
+                        x = x.float().to(self.device)
+                        y = y.long().to(self.device)
+                        mask = mask.long().to(self.device)
+                        x_gt = x
 
-                    y_hat, x_hat, _, _= self.model(x)
-                    N_cls = y_hat.size(0)//B
-                    pred_list.append(y_hat.view(N_cls,B,-1,T))
-                    y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
-                    y_hat = rearrange(y_hat, "b i t -> (b t) i")
-                    cls_loss = self.cls_loss(y_hat, y)
-                    N_rec = x_hat.size(0)//B
-                    x_gt = x.unsqueeze(0).expand(N_rec, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
-                    mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec)
+                        y_hat, x_hat, _, _= self.model(x)
+                        attention = torch.cat(self.model.get_attention())
+                        attention_list.append(attention.view(4,B,M,V,4,T,T)[-1,:,0,:,:,:,:].detach().cpu())
+                        N_cls = y_hat.size(0)//B
+                        input_lst.append(x)
+                        pred_list.append(y_hat.view(N_cls,B,-1,T).detach().cpu())
+                        y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
+                        y_hat = rearrange(y_hat, "b i t -> (b t) i")
+                        cls_loss = self.cls_loss(y_hat, y)
+                        N_rec = x_hat.size(0)//B
+                        x_gt = x.unsqueeze(0).expand(N_rec, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
+                        mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec)
 
-                    _, predict_label = torch.max(y_hat.data, 1)
-                    for i in range(N_rec):
-                        mask_recon[i,:,:,:i+1,:,:] = 0.
-                    mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
-                    step += 1
-                for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
-                    self.log_acc[i].update((predict_label == y.data)\
-                                           .view(N_cls,B,-1)[-1,:,int(math.ceil(T*ratio))-1].float().mean(), B)
-                self.log_cls_loss.update(cls_loss.data.item(), B)
+                        _, predict_label = torch.max(y_hat.data, 1)
+                        for i in range(N_rec):
+                            mask_recon[i,:,:,:i+1,:,:] = 0.
+                        mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
+                        step += 1
+                    for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
+                        self.log_acc[i].update((predict_label == y.data)\
+                                            .view(N_cls,B,-1)[-1,:,int(math.ceil(T*ratio))-1].float().mean(), B)
+                    self.log_cls_loss.update(cls_loss.data.item(), B)
 
-                tbar.set_description(
-                    f"[Epoch #{epoch}] "\
-                    f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
-                )
-            pred_list = torch.cat(pred_list, dim=1)
-            label_list = torch.cat(label_list, dim=0).to(pred_list.device)
-            # alpha = find_best_agreement(pred_list, label_list, T)
-            new_array = []
-            pred = pred_list.clone().permute(1,3,0,2)
-            for t in range(T):
-                new_array.append(torch.cat((pred[:,:t,0,:],pred[:,t,:,:]), dim=1))
-            y_hat_0 = torch.argmax(pred, dim=3)[:,:,-1]
-            corrects_origin = (y_hat_0 == label_list.unsqueeze(1)).sum(0)
-            diff, corrects_agree = agreement(new_array, pred_list, label_list, corrects_origin, alpha, T)
-            attention = torch.cat(self.model.get_attention())
-            pred = pred # B, T, N, Cls
+                    tbar.set_description(
+                        f"[Epoch #{epoch}] "\
+                        f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
+                    )
+                    input_list = torch.cat(input_lst, dim=1)
+                    pred_list = torch.cat(pred_list, dim=1)
+                    label_list = torch.cat(label_list, dim=0).to(pred_list.device)
+                    # alpha = find_best_agreement(pred_list, label_list, T)
+                    new_array = []
+                    pred = pred_list.clone().permute(1,3,0,2)
+                    for t in range(T):
+                        new_array.append(torch.cat((pred[:,:t,0,:],pred[:,t,:,:]), dim=1))
+                    y_hat_0 = torch.argmax(pred, dim=3)[:,:,-1]
+                    corrects_origin = (y_hat_0 == label_list.unsqueeze(1)).sum(0)
+                    diff, corrects_agree = agreement(new_array, pred_list, label_list, corrects_origin, alpha, T)
+                    pred = pred # B, T, N, Cls
 
-            with open('pred_lst_ucla_n3.pkl', 'wb') as f:
-                pickle.dump(pred_list.detach().cpu().numpy(), f)
-            with open('label_list.pkl', 'wb') as f:
-                pickle.dump(label_list.detach().cpu().numpy(), f)
-            with open('attention.pkl', 'wb') as f:
-                pickle.dump(attention.detach().cpu().numpy(), f)
+                    with open(f'result/skeleton_{self.arg.datacase}.pkl', 'wb') as f:
+                        pickle.dump(input_list.cpu().numpy(), f)
+                    with open(f'result/pred_lst_{self.arg.datacase}_n{self.arg.n_step}.pkl', 'wb') as f:
+                        pickle.dump(pred_list.detach().cpu().numpy(), f)
+                    with open(f'result/label_list_{self.arg.datacase}_n{self.arg.n_step}.pkl', 'wb') as f:
+                        pickle.dump(label_list.detach().cpu().numpy(), f)
+                    with open(f'result/attention_{self.arg.datacase}_n{self.arg.n_step}.pkl', 'wb') as f:
+                        pickle.dump(attention.detach().cpu().numpy(), f)
+                    import ipdb; ipdb.set_trace()
 
             eval_dict={f"eval/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)}
             wandb.log(eval_dict)
