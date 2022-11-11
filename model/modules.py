@@ -359,10 +359,6 @@ class TemporalEncoder(nn.Module):
 
         self.to_latent = nn.Identity()
 
-        self.mlp_head = nn.Sequential(
-            # nn.LayerNorm(dim),
-            nn.Linear(dim, dim)
-        )
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -385,7 +381,6 @@ class TemporalEncoder(nn.Module):
         # x = self.pos_embedding(x)
         x = self.transformer(x)
         x = self.to_latent(x)
-        x = self.mlp_head(x)
         x = rearrange(x, '(b v) t c -> b c t v', v=V)
         return x[:,:C,:,:]
 
