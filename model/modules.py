@@ -360,7 +360,7 @@ class TemporalEncoder(nn.Module):
         self.to_latent = nn.Identity()
 
         self.mlp_head = nn.Sequential(
-            nn.LayerNorm(dim),
+            # nn.LayerNorm(dim),
             nn.Linear(dim, dim)
         )
         self.apply(self._init_weights)
