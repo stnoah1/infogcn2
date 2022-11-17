@@ -94,8 +94,8 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 dct=True, T=64, n_step=1, dilation=1, z_pooling="None", SAGC_proj=True,
-                 n_sample=1, sigma=None, backbone='transformer'):
+                 dct=True, T=64, n_step=1, dilation=1, SAGC_proj=True,
+                 n_sample=1, backbone='transformer'):
         super(InfoGCN, self).__init__()
 
         self.Graph = import_class(graph)()
@@ -129,7 +129,6 @@ class InfoGCN(nn.Module):
         self.n_sample = n_sample
         self.n_step = n_step
         self.arange_n_step = torch.arange(self.n_step+1)
-        self.z_pooling = z_pooling
         print(backbone)
 
         ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), N=n_step, T=T).to(device)

@@ -127,9 +127,7 @@ class Processor():
             T=self.arg.window_size,
             n_step=self.arg.n_step,
             dilation=self.arg.dilation,
-            z_pooling=self.arg.z_pooling,
             SAGC_proj=self.arg.SAGC_proj,
-            sigma=self.arg.sigma,
             backbone=self.arg.backbone,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
@@ -272,8 +270,7 @@ class Processor():
             else:
                 loss.backward()
 
-            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)# if self.arg.datacase=="NTU120_CSet" \
-                #else  nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
             value, predict_label = torch.max(y_hat.data, 1)
@@ -284,7 +281,7 @@ class Processor():
             self.log_feature_loss.update(feature_loss.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
 
-            AUC = np.mean([self.log_acc[i].avg for i in range(10)])
+            AUC = np.mean([self.log_acc[i].avg.cpu().numpy() for i in range(10)])
             tbar.set_description(
                 f"[Epoch #{epoch}] "\
                 f"AUC:{AUC:.3f}, " \
@@ -372,7 +369,7 @@ class Processor():
                 self.log_recon_loss.update(recon_loss.data.item(), B)
                 self.log_feature_loss.update(feature_loss.data.item(), B)
 
-                AUC = np.mean([self.log_acc[i].avg for i in range(10)])
+                AUC = np.mean([self.log_acc[i].avg.cpu().numpy() for i in range(10)])
                 tbar.set_description(
                     f"[Epoch #{epoch}] "\
                     f"AUC:{AUC:.3f}, " \
