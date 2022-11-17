@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from model.modules import SA_GC, GCN
 
+
 class SAGC_LSTM_Cell(nn.Module):
     def __init__(self, input_dim, hidden_dim, A):
         """

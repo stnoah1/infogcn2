@@ -3,18 +3,6 @@ import math
 import torch.nn as nn
 
 
-def activation_factory(name, inplace=True):
-    if name == 'relu':
-        return nn.ReLU(inplace=inplace)
-    elif name == 'leakyrelu':
-        return nn.LeakyReLU(0.2, inplace=inplace)
-    elif name == 'tanh':
-        return nn.Tanh()
-    elif name == 'linear' or name is None:
-        return nn.Identity()
-    else:
-        raise ValueError('Not supported activation:', name)
-
 def import_class(name):
     components = name.split('.')
     mod = __import__(components[0])

@@ -127,8 +127,6 @@ class Processor():
             T=self.arg.window_size,
             n_step=self.arg.n_step,
             dilation=self.arg.dilation,
-            temporal_pooling=self.arg.temporal_pooling,
-            spatial_pooling=self.arg.spatial_pooling,
             z_pooling=self.arg.z_pooling,
             SAGC_proj=self.arg.SAGC_proj,
             sigma=self.arg.sigma,
@@ -283,15 +281,14 @@ class Processor():
             for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                 self.log_acc[i].update((predict_label == y.data)\
                                         .view(N_cls*B,-1)[:,int(math.ceil(T*ratio))-1].float().mean(), B)
-            self.log_auc.update((predict_label == y.data)\
-                                .view(N_cls*B,-1).float().mean(), B)
             self.log_cls_loss.update(cls_loss.data.item(), B)
             self.log_feature_loss.update(feature_loss.data.item(), B)
             self.log_recon_loss.update(recon_loss.data.item(), B)
 
+            AUC = np.mean([self.log_acc[i].avg for i in range(10)])
             tbar.set_description(
                 f"[Epoch #{epoch}] "\
-                f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
+                f"AUC:{AUC:.3f}, " \
                 f"CLS:{self.log_cls_loss.avg:.3f}, " \
                 f"FT:{self.log_feature_loss.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
@@ -300,7 +297,7 @@ class Processor():
             "train/Recon2D_loss":self.log_recon_loss.avg,
             "train/cls_loss":self.log_cls_loss.avg,
             "train/feature_loss":self.log_feature_loss.avg,
-            "train/AUC":self.log_auc.avg,
+            "train/AUC":AUC,
         }
         train_dict.update({f"train/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
         wandb.log(train_dict)
@@ -317,7 +314,6 @@ class Processor():
         self.log_cls_loss.reset()
         self.log_feature_loss.reset()
         self.log_recon_loss.reset()
-        self.log_auc.reset()
         self.log_recon_2d_loss.reset()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
         for ln in loader_name:
@@ -377,9 +373,10 @@ class Processor():
                 self.log_recon_loss.update(recon_loss.data.item(), B)
                 self.log_feature_loss.update(feature_loss.data.item(), B)
 
+                AUC = np.mean([self.log_acc[i].avg for i in range(10)])
                 tbar.set_description(
                     f"[Epoch #{epoch}] "\
-                    f"ACC_0.5:{self.log_acc[4].avg:.3f}, " \
+                    f"AUC:{AUC:.3f}, " \
                     f"CLS:{self.log_cls_loss.avg:.3f}, " \
                     f"FT:{self.log_feature_loss.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
@@ -389,7 +386,7 @@ class Processor():
                 "eval/Recon2D_loss":self.log_recon_loss.avg,
                 "eval/cls_loss":self.log_cls_loss.avg,
                 "eval/feature_loss":self.log_feature_loss.avg,
-                "eval/AUC":self.log_auc.avg,
+                "eval/AUC":AUC,
             }
             eval_dict.update({f"eval/ACC_{(i+1)/10}":self.log_acc[i].avg for i in range(10)})
             wandb.log(eval_dict)
@@ -401,31 +398,6 @@ class Processor():
 
             score_dict = dict(
                 zip(self.data_loader[ln].dataset.sample_name, score))
-            # for k in self.arg.show_topk:
-                # self.print_log('\tTop{}: {:.2f}%'.format(
-                    # k, 100 * self.data_loader[ln].dataset.top_k(score, k)))
-
-            if save_score:
-                with open('{}/epoch{}_{}_score.pkl'.format(
-                        self.arg.work_dir, epoch + 1, ln), 'wb') as f:
-                    pickle.dump(score_dict, f)
-
-            accuracy = self.data_loader[ln].dataset.top_k(score, 1)
-            if accuracy > self.best_acc:
-                self.best_acc = accuracy
-                self.best_acc_epoch = epoch + 1
-                with open(f'{self.arg.work_dir}/best_score.pkl', 'wb') as f:
-                    pickle.dump(score_dict, f)
-
-            # print('Accuracy: ', accuracy, ' model: ', self.arg.model_saved_name)
-            # acc for each class:
-            label_list = np.concatenate(label_list)
-            # pred_lst = np.concatenate(pred_list, axis=1)
-            # with open('pred_lst.pkl', 'wb') as f:
-                # pickle.dump(pred_lst, f)
-            # with open('label_list.pkl', 'wb') as f:
-                # pickle.dump(label_list, f)
-
 
     def start(self):
         if self.arg.phase == 'train':
@@ -435,21 +407,10 @@ class Processor():
             self.print_log(f'# Parameters: {count_parameters(self.model)/10**6:.3f}M')
             for epoch in range(self.arg.start_epoch, self.arg.num_epoch):
                 save_model = (epoch + 1 > self.arg.save_epoch)
-
                 self.train(epoch, save_model=save_model)
-
                 if epoch > self.arg.save_epoch:
                     self.eval(epoch, save_score=self.arg.save_score, loader_name=['test'])
-
-            # test the best model
-            # weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
-            # weights = torch.load(weights_path)
-            # self.model.load_state_dict(weights)
-
-            # self.arg.print_log = False
-            # self.eval(epoch=0, save_score=True, loader_name=['test'])
             self.arg.print_log = True
-
 
             num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
             self.print_log(f'Best accuracy: {self.best_acc}')
@@ -466,9 +427,6 @@ class Processor():
             if self.arg.weights is None:
                 raise ValueError('Please appoint --weights.')
             self.arg.print_log = False
-            self.model.set_n_sample(self.arg.n_sample)
-            # self.print_log('Model:   {}.'.format(self.arg.model))
-            self.print_log('Weights: {}.'.format(self.arg.weights))
             self.eval(epoch=0, save_score=self.arg.save_score, loader_name=['test'])
             self.print_log('Done.\n')
 
