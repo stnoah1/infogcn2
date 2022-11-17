@@ -6,5 +6,5 @@ __pycache__
 *.pt
 *.yaml
 *.npz
-data/
+data/NW-UCLA/all_seq
 results/
