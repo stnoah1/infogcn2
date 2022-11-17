@@ -8,8 +8,6 @@ from einops import rearrange
 from torch.autograd import Variable
 from einops.layers.torch import Rearrange
 
-
-from model.ms_tcn import MultiScale_TemporalConv as MS_TCN
 from model.utils import conv_init, bn_init, conv_branch_init
 
 

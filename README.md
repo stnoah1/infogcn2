@@ -1,16 +1,11 @@
-# InfoGCN
-Official PyTorch implementation of "[InfoGCN: Representation Learning for Human Skeleton-based Action Recognition](https://openaccess.thecvf.com/content/CVPR2022/html/Chi_InfoGCN_Representation_Learning_for_Human_Skeleton-Based_Action_Recognition_CVPR_2022_paper.html)", CVPR22.
-
-## Abstract
-<img src="resources/main_fig.png" width="600" />
-Human skeleton-based action recognition offers a valuable means to understand the intricacies of human behavior because it can handle the complex relationships between physical constraints and intention. Although several studies have focused on encoding a skeleton, less attention has been paid to embed this information into the latent representations of human action. InfoGCN proposes a learning framework for action recognition combining a novel learning objective and an encoding method. First, we design an information bottleneck-based learning objective to guide the model to learn informative but compact latent representations. To provide discriminative information for classifying action, we introduce attention-based graph convolution that captures the context-dependent intrinsic topology of human action. In addition, we present a multi-modal representation of the skeleton using the relative position of joints, designed to provide complementary spatial information for joints. InfoGCN surpasses the known state-of-the-art on multiple skeleton-based action recognition benchmarks with the accuracy of 93.0% on NTU RGB+D 60 cross-subject split, 89.8% on NTU RGB+D 120 cross-subject split, and 97.0% on NW-UCLA.
+# SODE
 
 ## Dependencies
 
-- Python >= 3.6
-- PyTorch >= 1.7.0
+- Python >= 3.8
+- PyTorch >= 1.9.0
 - NVIDIA Apex
-- tqdm, tensorboardX, wandb
+- tqdm, tensorboardX, wandb, einops
 
 ## Data Preparation
 
@@ -63,7 +58,7 @@ Put downloaded data into the following directory structure:
  cd ./data/ntu # or cd ./data/ntu120
  # Get skeleton of each performer
  python get_raw_skes_data.py
- # Remove the bad skeleton 
+ # Remove the bad skeleton
  python get_raw_denoised_data.py
  # Transform the skeleton to the center of the first frame and vertically align to the ground
  python seq_transformation.py
@@ -73,15 +68,14 @@ Put downloaded data into the following directory structure:
 
 ### Training
 - We set the seed number for Numpy and PyTorch as 1 for reproducibility.
-- If you want to reproduce our works, please find the details in the supplementary matrials. The hyperparameter setting differs depending on the training dataset. 
-- This is an exmaple command for training InfoGCN on NTU RGB+D 60 Cross Subject split. Please change the arguments if you want to customize the training. `--k` indicates k value of k-th mode represenation of skeleton. If you set `--use_vel=True`, the model will be trained with motion.
+- If you want to reproduce our works, please find the details in the supplementary matrials. The hyperparameter setting differs depending on the training dataset.
+- This is an exmaple command for training InfoGCN on NTU RGB+D 60 Cross Subject split. Please change the arguments if you want to customize the training.
 
 ```
-python main.py --half=True --batch_size=128 --test_batch_size=128 \
-    --step 90 100 --num_epoch=110 --n_heads=3 --num_worker=4 --k=1 \
-    --dataset=ntu --num_class=60 --lambda_1=1e-4 --lambda_2=1e-1 --z_prior_gain=3 \
-    --use_vel=False --datacase=NTU60_CS --weight_decay=0.0005 \
-    --num_person=2 --num_point=25 --graph=graph.ntu_rgb_d.Graph --feeder=feeders.feeder_ntu.Feeder
+CUDA_VISIBLE_DEVICES=0 python main.py --half=True --batch_size=32 --test_batch_size=64 \
+    --step 50 60 --num_epoch=70 --n_heads=3 --num_worker=4 \
+    --dataset=NW-UCLA --num_class=10 --z_prior_gain=3 \
+    --datacase=ucla --weight_decay=0.0005 --num_person=1 --num_point=20 --graph=graph.ucla.Graph --feeder=feeders.feeder_ucla.Feeder --base_lr 1e-1 --base_channel 64 --dct False --window_size 52 --lambda_1=1e-0 --lambda_2=1.0 --lambda_3=1e+1 --n_step 3 --save_epoch 0
 ```
 
 ### Testing

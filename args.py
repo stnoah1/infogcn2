@@ -76,16 +76,16 @@ def get_parser():
     parser.add_argument('--weight_decay', type=float, default=0.0003, help='weight decay for optimizer')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--warm_up_epoch', type=int, default=0)
-    parser.add_argument('--lambda_1', type=float, default=1e-0)
-    parser.add_argument('--lambda_2', type=float, default=1e-0)
-    parser.add_argument('--lambda_3', type=float, default=0e-0)
+    parser.add_argument('--lambda_1', type=float, default=1e+0)
+    parser.add_argument('--lambda_2', type=float, default=1e+0)
+    parser.add_argument('--lambda_3', type=float, default=1e+1)
 
     # apex
     parser.add_argument('--half', type=str2bool, default=True, help='Use half-precision (FP16) training')
     parser.add_argument('--amp_opt_level', type=int, default=1, help='NVIDIA Apex AMP optimization level')
 
     # ODE
-    parser.add_argument('--n_step', type=int, default=1, help='')
+    parser.add_argument('--n_step', type=int, default=3, help='')
     parser.add_argument('--N', type=int, default=1, help='')
     parser.add_argument('--dilation', type=int, default=1, help='')
     parser.add_argument('--ode_method', type=str, default="euler", help='')

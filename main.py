@@ -133,7 +133,6 @@ class Processor():
             backbone=self.arg.backbone,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
-        # self.cls_loss = LabelSmoothingCrossEntropy(self.arg.N_step+1, self.arg.batch_size, self.arg.T).to(self.device)
         self.recon_loss = masked_recon_loss
 
         if self.arg.weights:
