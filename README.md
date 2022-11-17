@@ -1,4 +1,4 @@
-# SODE
+# SODE: Learning Representation by Predicting the Future for Online Skeleton-based Action Recognition
 
 ## Dependencies
 
