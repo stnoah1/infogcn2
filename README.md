@@ -81,7 +81,7 @@ Put downloaded data into the following directory structure:
 
 ### Training
 
-- We set the seed number for Numpy and PyTorch as 1 for reproducibility.
+- We set the seed number for Numpy and PyTorch as `1` for reproducibility.
 - If you want to reproduce our works, please find the details in the supplementary matrials. The hyperparameter setting differs depending on the training dataset.
 - This is an exmaple command for training SODE on NW-UCLA dataset. Please change the arguments if you want to customize the training.
 
