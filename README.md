@@ -1,5 +1,17 @@
 # SODE: Learning Representation by Predicting the Future for Online Skeleton-based Action Recognition
 
+## Abstract:
+Despite the impressive performance of recent algorithms on skeletal action recognition, these works are not applicable to applications that require real-time and online decision-making.
+The primary reason is that the recognition results are produced only after the whole observation of action.
+To overcome the limitation of current methods for skeleton-based action recognition, we address an online skeleton-based action recognition method, whose goal is to provide the action category while the action is being performed.
+In this work, we propose a new framework, Skeleton-ODE (SODE), which tackles online skeleton-based action recognition.
+We design SODE to provide the action category in real-time at any observation length with a single trained model.
+We guide SODE to predict the future motion from the observation to make it learn to represent the entire sequence from the previous observation.
+To enable SODE, we reformulate future prediction as an extrapolation of the observation.
+We adopt the concept of Neural Ordinary Differential Equation (ODE) to model the continuous flow of hidden states.
+Through extensive experiments, we demonstrate the advantages of SODE for online skeleton-based action recognition.
+SODE outperforms existing methods on three popular skeleton-based action benchmarks by a large margin in terms of AUC.
+
 ## Dependencies
 
 - Python >= 3.8
