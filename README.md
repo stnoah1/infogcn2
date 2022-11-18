@@ -1,6 +1,6 @@
 # SODE: Learning Representation by Predicting the Future for Online Skeleton-based Action Recognition
 
-## Abstract:
+## Abstract
 Despite the impressive performance of recent algorithms on skeletal action recognition, these works are not applicable to applications that require real-time and online decision-making.
 The primary reason is that the recognition results are produced only after the whole observation of action.
 To overcome the limitation of current methods for skeleton-based action recognition, we address an online skeleton-based action recognition method, whose goal is to provide the action category while the action is being performed.
