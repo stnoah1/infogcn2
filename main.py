@@ -289,6 +289,7 @@ class Processor():
                 f"FT:{self.log_feature_loss.avg:.3f}, " \
                 f"RECON:{self.log_recon_loss.avg:.5f}, " \
             )
+        AUC = np.mean([self.log_acc[i].avg.cpu().numpy() for i in range(10)])
         train_dict = {
             "train/Recon2D_loss":self.log_recon_loss.avg,
             "train/cls_loss":self.log_cls_loss.avg,
@@ -331,7 +332,6 @@ class Processor():
 
                     y_hat, x_hat, z_0, z_hat = self.model(x)
                     N_cls = y_hat.size(0)//B
-                    # pred_list.append(y_hat.view(N_cls,B,-1).detach().cpu().numpy())
                     y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
                     y_hat = rearrange(y_hat, "b i t -> (b t) i")
                     cls_loss = self.cls_loss(y_hat, y)
@@ -362,7 +362,7 @@ class Processor():
                     step += 1
                 for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\
-                                           .view(N_cls,B,-1)[N_cls-1,:,int(math.ceil(T*ratio))-1].float().mean(), B)
+                                            .view(N_cls*B,-1)[:,int(math.ceil(T*ratio))-1].float().mean(), B)
                 self.log_auc.update((predict_label == y.data)\
                                     .view(N_cls,B,-1)[-1,:,:].float().mean(), B)
                 self.log_cls_loss.update(cls_loss.data.item(), B)
@@ -378,6 +378,7 @@ class Processor():
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 )
 
+            AUC = np.mean([self.log_acc[i].avg.cpu().numpy() for i in range(10)])
             eval_dict = {
                 "eval/Recon2D_loss":self.log_recon_loss.avg,
                 "eval/cls_loss":self.log_cls_loss.avg,

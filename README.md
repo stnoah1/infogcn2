@@ -5,7 +5,8 @@
 - Python >= 3.8
 - PyTorch >= 1.9.0
 - NVIDIA Apex
-- tqdm, tensorboardX, wandb, einops
+- tqdm, tensorboardX, wandb
+- einops, torchdiffeq
 
 ## Data Preparation
 
@@ -93,6 +94,8 @@ python main.py --half=True --test_batch_size=64 --num_worker=4 --dataset=NW-UCLA
 
 ## Acknowledgements
 
-This repo is based on [2s-AGCN](https://github.com/lshiwjx/2s-AGCN), [CTR-GCN](https://github.com/Uason-Chen/CTR-GCN), and [InfoGCN](https://github.com/stnoah1/infogcn). The data processing is borrowed from [SGN](https://github.com/microsoft/SGN), [HCN](https://github.com/huguyuehuhu/HCN-pytorch), and [Predict & Cluster](https://github.com/shlizee/Predict-Cluster).
+This repo is based on [2s-AGCN](https://github.com/lshiwjx/2s-AGCN), [CTR-GCN](https://github.com/Uason-Chen/CTR-GCN), and [InfoGCN](https://github.com/stnoah1/infogcn).
+The data processing is borrowed from [SGN](https://github.com/microsoft/SGN), [HCN](https://github.com/huguyuehuhu/HCN-pytorch), and [Predict & Cluster](https://github.com/shlizee/Predict-Cluster).
+We use the Differentiable ODE Solvers for pytorch from [torchdiffeq](https://github.com/rtqichen/torchdiffeq).
 
 Thanks to the original authors for their work!

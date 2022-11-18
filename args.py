@@ -25,7 +25,6 @@ def get_parser():
     parser.add_argument('--dataset', default='ntu', help='data loader will be used')
     parser.add_argument('--datacase', default='CS', help='data loader will be used')
     parser.add_argument('--use_vel', type=str2bool, default=False, help='')
-    parser.add_argument('--dct_order', type=int, default=64, help='')
 
     # processor
     parser.add_argument('--phase', default='train', help='must be train or test')
@@ -63,7 +62,7 @@ def get_parser():
 
     # optim
     parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
-    parser.add_argument('--step', type=int, default=[10, 15], nargs='+', help='the epoch where optimizer reduce the learning rate')
+    parser.add_argument('--step', type=int, default=[50, 60], nargs='+', help='the epoch where optimizer reduce the learning rate')
     parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
     parser.add_argument('--nesterov', type=str2bool, default=True, help='use nesterov or not')
     parser.add_argument('--batch_size', type=int, default=64, help='training batch size')
@@ -83,7 +82,6 @@ def get_parser():
 
     # ODE
     parser.add_argument('--n_step', type=int, default=3, help='')
-    parser.add_argument('--N', type=int, default=1, help='')
     parser.add_argument('--dilation', type=int, default=1, help='')
     parser.add_argument('--ode_method', type=str, default="euler", help='')
 

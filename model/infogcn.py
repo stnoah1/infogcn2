@@ -3,11 +3,8 @@ import math
 import random
 import torch
 import torch.nn.functional as F
-import torch_dct as dct
 
 from torch import nn
-
-from einops import rearrange
 
 from model.modules import SA_GC, TemporalEncoder, GCN
 from model.utils import bn_init, import_class, sample_standard_gaussian,\
@@ -20,7 +17,6 @@ from torchdiffeq import odeint as odeint
 
 from torch.distributions.normal import Normal
 from torch.distributions import kl_divergence
-from torchdiffeq import odeint as odeint
 
 
 class DiffeqSolver(nn.Module):
@@ -94,13 +90,12 @@ class ODEFunc(nn.Module):
 class InfoGCN(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 dct=True, T=64, n_step=1, dilation=1, SAGC_proj=True,
+                 T=64, n_step=1, dilation=1, SAGC_proj=True,
                  n_sample=1, backbone='transformer'):
         super(InfoGCN, self).__init__()
 
         self.Graph = import_class(graph)()
         A = np.stack([self.Graph.A_norm] * num_head, axis=0)
-        self.dct = dct
         self.T = T
         method = ode_method
         self.arange = torch.arange(T).view(1,1,T)+1
