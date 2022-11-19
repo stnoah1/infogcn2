@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 from args import get_parser
 from loss import LabelSmoothingCrossEntropy, masked_recon_loss
-from model.infogcn import InfoGCN
+from model.sode import SODE
 from utils import AverageMeter, import_class
 from einops import rearrange, repeat
 

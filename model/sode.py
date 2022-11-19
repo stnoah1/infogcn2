@@ -87,12 +87,12 @@ class ODEFunc(nn.Module):
         x = rearrange(x, 'b t c v -> (b t) c v')
         return x
 
-class InfoGCN(nn.Module):
+class SODE(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
                  T=64, n_step=1, dilation=1, SAGC_proj=True,
                  n_sample=1, backbone='transformer'):
-        super(InfoGCN, self).__init__()
+        super(SODE, self).__init__()
 
         self.Graph = import_class(graph)()
         A = np.stack([self.Graph.A_norm] * num_head, axis=0)
