@@ -112,7 +112,7 @@ class Processor():
             worker_init_fn=init_seed)
 
     def load_model(self):
-        self.model = InfoGCN(
+        self.model = SODE(
             num_class=self.arg.num_class,
             num_point=self.arg.num_point,
             num_person=self.arg.num_person,
