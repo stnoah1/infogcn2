@@ -1,16 +1,25 @@
-# InfoGCN
-Official PyTorch implementation of "[InfoGCN: Representation Learning for Human Skeleton-based Action Recognition](https://openaccess.thecvf.com/content/CVPR2022/html/Chi_InfoGCN_Representation_Learning_for_Human_Skeleton-Based_Action_Recognition_CVPR_2022_paper.html)", CVPR22.
+# Skeleton-ODE: Learning Representation by Predicting the Future for Online Skeleton-based Action Recognition
+<img width="1166" alt="framework" src="https://user-images.githubusercontent.com/37060326/202824122-e98197b6-ebe4-4487-8f08-aa08738cb86c.png">
 
 ## Abstract
-<img src="resources/main_fig.png" width="600" />
-Human skeleton-based action recognition offers a valuable means to understand the intricacies of human behavior because it can handle the complex relationships between physical constraints and intention. Although several studies have focused on encoding a skeleton, less attention has been paid to embed this information into the latent representations of human action. InfoGCN proposes a learning framework for action recognition combining a novel learning objective and an encoding method. First, we design an information bottleneck-based learning objective to guide the model to learn informative but compact latent representations. To provide discriminative information for classifying action, we introduce attention-based graph convolution that captures the context-dependent intrinsic topology of human action. In addition, we present a multi-modal representation of the skeleton using the relative position of joints, designed to provide complementary spatial information for joints. InfoGCN surpasses the known state-of-the-art on multiple skeleton-based action recognition benchmarks with the accuracy of 93.0% on NTU RGB+D 60 cross-subject split, 89.8% on NTU RGB+D 120 cross-subject split, and 97.0% on NW-UCLA.
+Despite the impressive performance of recent algorithms on skeletal action recognition, these works are not applicable to applications that require real-time and online decision-making.
+The primary reason is that the recognition results are produced only after the whole observation of action.
+To overcome the limitation of current methods for skeleton-based action recognition, we address an online skeleton-based action recognition method, whose goal is to provide the action category while the action is being performed.
+In this work, we propose a new framework, Skeleton-ODE (SODE), which tackles online skeleton-based action recognition.
+We design SODE to provide the action category in real-time at any observation length with a single trained model.
+We guide SODE to predict the future motion from the observation to make it learn to represent the entire sequence from the previous observation.
+To enable SODE, we reformulate future prediction as an extrapolation of the observation.
+We adopt the concept of Neural Ordinary Differential Equation (ODE) to model the continuous flow of hidden states.
+Through extensive experiments, we demonstrate the advantages of SODE for online skeleton-based action recognition.
+SODE outperforms existing methods on three popular skeleton-based action benchmarks by a large margin in terms of AUC.
 
 ## Dependencies
 
-- Python >= 3.6
-- PyTorch >= 1.7.0
+- Python >= 3.8
+- PyTorch >= 1.9.0
 - NVIDIA Apex
 - tqdm, tensorboardX, wandb
+- einops, torchdiffeq
 
 ## Data Preparation
 
@@ -63,7 +72,7 @@ Put downloaded data into the following directory structure:
  cd ./data/ntu # or cd ./data/ntu120
  # Get skeleton of each performer
  python get_raw_skes_data.py
- # Remove the bad skeleton 
+ # Remove the bad skeleton
  python get_raw_denoised_data.py
  # Transform the skeleton to the center of the first frame and vertically align to the ground
  python seq_transformation.py
@@ -72,16 +81,17 @@ Put downloaded data into the following directory structure:
 ## Training & Testing
 
 ### Training
-- We set the seed number for Numpy and PyTorch as 1 for reproducibility.
-- If you want to reproduce our works, please find the details in the supplementary matrials. The hyperparameter setting differs depending on the training dataset. 
-- This is an exmaple command for training InfoGCN on NTU RGB+D 60 Cross Subject split. Please change the arguments if you want to customize the training. `--k` indicates k value of k-th mode represenation of skeleton. If you set `--use_vel=True`, the model will be trained with motion.
+
+- We set the seed number for Numpy and PyTorch as `1` for reproducibility.
+- If you want to reproduce our works, please find the details in the supplementary matrials. The hyperparameter setting differs depending on the training dataset.
+- This is an exmaple command for training SODE on NW-UCLA dataset. Please change the arguments if you want to customize the training.
 
 ```
-python main.py --half=True --batch_size=128 --test_batch_size=128 \
-    --step 90 100 --num_epoch=110 --n_heads=3 --num_worker=4 --k=1 \
-    --dataset=ntu --num_class=60 --lambda_1=1e-4 --lambda_2=1e-1 --z_prior_gain=3 \
-    --use_vel=False --datacase=NTU60_CS --weight_decay=0.0005 \
-    --num_person=2 --num_point=25 --graph=graph.ntu_rgb_d.Graph --feeder=feeders.feeder_ntu.Feeder
+python main.py --half=True --batch_size=32 --test_batch_size=64 \
+    --step 50 60 --num_epoch=70 --num_worker=4 --dataset=NW-UCLA --num_class=10 \
+    --datacase=ucla --weight_decay=0.0005 --num_person=1 --num_point=20 --graph=graph.ucla.Graph \
+    --feeder=feeders.feeder_ucla.Feeder --base_lr 1e-1 --base_channel 64 \
+    --window_size 52 --lambda_1=1e-0 --lambda_2=1.0 --lambda_3=1e+1 --n_step 3
 ```
 
 ### Testing
@@ -89,28 +99,16 @@ python main.py --half=True --batch_size=128 --test_batch_size=128 \
 - To test the trained models saved in <work_dir>, run the following command:
 
 ```
-python main.py --half=True --test_batch_size=128 --n_heads=3 --num_worker=4 \
-    --k=1 --dataset=ntu --num_class=60 --use_vel=False --datacase=NTU60_CS \
-    --num_person=2 --num_point=25 --graph=graph.ntu_rgb_d.Graph --feeder=feeders.feeder_ntu.Feeder \
-    --phase=test --save_score=True --weights=<path_to_weight>
-```
-
-- To ensemble the results of different modalities, run the following command:
-```
-python ensemble.py \
-   --dataset=ntu/xsub \
-   --position_ckpts \
-      <work_dir_1>/files/best_score.pkl \
-      <work_dir_2>/files/best_score.pkl \
-      ...
-   --motion_ckpts \
-      <work_dir_3>/files/best_score.pkl \
-      <work_dir_4>/files/best_score.pkl \
-      ...
+python main.py --half=True --test_batch_size=64 --num_worker=4 --dataset=NW-UCLA --num_class=10 \
+    --datacase=ucla --num_person=1 --num_point=20 --graph=graph.ucla.Graph \
+    --feeder=feeders.feeder_ucla.Feeder --base_channel 64 --window_size 52 --n_step 3 \
+    --phase=test --weights=<path_to_weight>
 ```
 
 ## Acknowledgements
 
-This repo is based on [2s-AGCN](https://github.com/lshiwjx/2s-AGCN) and [CTR-GCN](https://github.com/Uason-Chen/CTR-GCN). The data processing is borrowed from [SGN](https://github.com/microsoft/SGN), [HCN](https://github.com/huguyuehuhu/HCN-pytorch), and [Predict & Cluster](https://github.com/shlizee/Predict-Cluster).
+This repo is based on [2s-AGCN](https://github.com/lshiwjx/2s-AGCN), [CTR-GCN](https://github.com/Uason-Chen/CTR-GCN), and [InfoGCN](https://github.com/stnoah1/infogcn).
+The data processing is borrowed from [SGN](https://github.com/microsoft/SGN), [HCN](https://github.com/huguyuehuhu/HCN-pytorch), and [Predict & Cluster](https://github.com/shlizee/Predict-Cluster).
+We use the Differentiable ODE Solvers for pytorch from [torchdiffeq](https://github.com/rtqichen/torchdiffeq).
 
 Thanks to the original authors for their work!

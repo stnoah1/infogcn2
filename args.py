@@ -25,7 +25,6 @@ def get_parser():
     parser.add_argument('--dataset', default='ntu', help='data loader will be used')
     parser.add_argument('--datacase', default='CS', help='data loader will be used')
     parser.add_argument('--use_vel', type=str2bool, default=False, help='')
-    parser.add_argument('--dct_order', type=int, default=64, help='')
 
     # processor
     parser.add_argument('--phase', default='train', help='must be train or test')
@@ -35,7 +34,7 @@ def get_parser():
     parser.add_argument('--seed', type=int, default=1, help='random seed for pytorch')
     parser.add_argument('--log_interval', type=int, default=100, help='the interval for printing messages (#iteration)')
     parser.add_argument('--save_interval', type=int, default=1, help='the interval for storing models (#iteration)')
-    parser.add_argument('--save_epoch', type=int, default=60, help='the start epoch to save model (#iteration)')
+    parser.add_argument('--save_epoch', type=int, default=0, help='the start epoch to save model (#iteration)')
     parser.add_argument('--eval_interval', type=int, default=5, help='the interval for evaluating models (#iteration)')
     parser.add_argument('--print_log', type=str2bool, default=True, help='print logging or not')
     parser.add_argument('--show_topk', type=int, default=[1, 5], nargs='+', help='which Top K accuracy will be shown')
@@ -47,8 +46,8 @@ def get_parser():
     parser.add_argument('--repeat', type=int, default=1, help='the number of repeat for data')
 
     # model
-    parser.add_argument('--window_size', type=int, default=64, help='window_size for reconstruction')
-    parser.add_argument('--base_channel', type=int, default=64, help='window_size for reconstruction')
+    parser.add_argument('--window_size', type=int, default=52, help='window_size for reconstruction')
+    parser.add_argument('--base_channel', type=int, default=64, help='hidden_demesion')
     parser.add_argument('--weights', default=None, help='the weights for network initialization')
     parser.add_argument('--ignore_weights', type=str, default=[], nargs='+', help='the name of weights which will be ignored in the initialization')
     parser.add_argument('--n_heads', type=int, default=3, help='')
@@ -57,17 +56,13 @@ def get_parser():
     parser.add_argument('--z_prior_gain', type=int, default=3, help='')
     parser.add_argument('--graph', type=str, default='graph.ntu_rgb_d.Graph', help='')
     parser.add_argument('--dct', type=str2bool, default=False, help='')
-    parser.add_argument('--temporal_pooling', type=str, default="None", help='')
-    parser.add_argument('--spatial_pooling', type=str, default="mean", help='')
-    parser.add_argument('--z_pooling', type=str, default="None", help='')
     parser.add_argument('--n_sample', type=int, default="1", help='')
     parser.add_argument('--SAGC_proj', type=str2bool, default=True, help='')
-    parser.add_argument('--sigma', type=float, default=None, help='')
     parser.add_argument('--backbone', type=str, default="transformer", help='')
 
     # optim
     parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
-    parser.add_argument('--step', type=int, default=[10, 15], nargs='+', help='the epoch where optimizer reduce the learning rate')
+    parser.add_argument('--step', type=int, default=[50, 60], nargs='+', help='the epoch where optimizer reduce the learning rate')
     parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
     parser.add_argument('--nesterov', type=str2bool, default=True, help='use nesterov or not')
     parser.add_argument('--batch_size', type=int, default=64, help='training batch size')
@@ -77,17 +72,16 @@ def get_parser():
     parser.add_argument('--weight_decay', type=float, default=0.0003, help='weight decay for optimizer')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--warm_up_epoch', type=int, default=0)
-    parser.add_argument('--lambda_1', type=float, default=1e-0)
-    parser.add_argument('--lambda_2', type=float, default=1e-0)
-    parser.add_argument('--lambda_3', type=float, default=0e-0)
+    parser.add_argument('--lambda_1', type=float, default=1e+0)
+    parser.add_argument('--lambda_2', type=float, default=1e+0)
+    parser.add_argument('--lambda_3', type=float, default=1e+1)
 
     # apex
     parser.add_argument('--half', type=str2bool, default=True, help='Use half-precision (FP16) training')
     parser.add_argument('--amp_opt_level', type=int, default=1, help='NVIDIA Apex AMP optimization level')
 
     # ODE
-    parser.add_argument('--n_step', type=int, default=1, help='')
-    parser.add_argument('--N', type=int, default=1, help='')
+    parser.add_argument('--n_step', type=int, default=3, help='')
     parser.add_argument('--dilation', type=int, default=1, help='')
     parser.add_argument('--ode_method', type=str, default="euler", help='')
 
