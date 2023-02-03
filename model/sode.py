@@ -108,6 +108,7 @@ class SODE(nn.Module):
         shift_idx = repeat(shift_idx, 'b t c v -> n b t c v', n=n_step)
         shift_idx = shift_idx - torch.arange(1, n_step+1, dtype=int).view(n_step,1,1,1,1)
         self.mask = torch.triu(torch.ones(n_step, T), diagonal=1).view(n_step,1,T,1,1)
+        self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
         self.shift_idx = shift_idx%T
         self.temporal_encoder = TemporalEncoder(
             seq_len=T,
@@ -150,7 +151,17 @@ class SODE(nn.Module):
             GCN(mid_dim, out_dim, A),
         )
 
-        self.classifier = nn.Conv1d(out_dim, num_class, 1)
+        self.c0 = nn.Conv1d(out_dim, num_class, 1)
+        self.c1 = nn.Conv1d(out_dim, num_class, 1)
+        self.c2 = nn.Conv1d(out_dim, num_class, 1)
+        self.c3 = nn.Conv1d(out_dim, num_class, 1)
+        self.c4 = nn.Conv1d(out_dim, num_class, 1)
+        self.c5 = nn.Conv1d(out_dim, num_class, 1)
+        self.c6 = nn.Conv1d(out_dim, num_class, 1)
+        self.c7 = nn.Conv1d(out_dim, num_class, 1)
+        self.c8 = nn.Conv1d(out_dim, num_class, 1)
+        self.c9 = nn.Conv1d(out_dim, num_class, 1)
+        self.classifier_lst = [self.c0,self.c1,self.c2,self.c3,self.c4,self.c5,self.c6,self.c7,self.c8,self.c9]
         self.spatial_pooling = torch.mean
 
     def extrapolate(self, z_0, t):
@@ -197,6 +208,16 @@ class SODE(nn.Module):
         I = np.eye(self.Graph.num_node)
         return  torch.from_numpy(I - np.linalg.matrix_power(A_outward, k))
 
+    def KL_div(self, z_mu, z_std, kl_coef=1):
+        z_distr = Normal(z_mu, z_std)
+        kldiv_z0 = kl_divergence(z_distr, self.z0_prior)
+        if torch.isnan(kldiv_z0).any():
+            print(z_mu)
+            print(z_std)
+            raise Exception("kldiv_z0 is Nan!")
+        loss = kldiv_z0.mean()
+        return loss
+
     def forward(self, x):
         N, C, T, V, M = x.size()
         x = rearrange(x, 'n c t v m -> (n m t) v c', n=N, m=M, v=V)
@@ -207,7 +228,9 @@ class SODE(nn.Module):
 
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
-        z = self.temporal_encoder(x)
+        z_mu, z_std = self.temporal_encoder(x)
+        kl_div = self.KL_div(z_mu, z_std)
+        z = self.latent_sample(z_mu, z_std)
 
         # extrapolation
         z_0, z_hat, z_hat_shifted = self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
@@ -225,9 +248,13 @@ class SODE(nn.Module):
         z_cls = rearrange(z_cls, '(n m l) c t v -> (n l) m c t v', m=M, l=self.n_sample).mean(1) # N, 2*D, T
         z_cls = self.spatial_pooling(z_cls,dim=-1)
 
-        y = self.classifier(z_cls) # N, num_cls, T
+        y_lst = []
+        for i in range(10):
+            int(math.ceil(64*i*0.1))
+            y_lst.append(self.classifier_lst[i](z_cls[:,:,int(math.ceil(64*i*0.1)):int(math.ceil(64*(i+1)*0.1))])) # N, num_cls, T
+        y = torch.cat(y_lst, dim=-1)
         y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
-        return y, x_hat, z_0, z_hat_shifted
+        return y, x_hat, z_0, z_hat_shifted, kl_div
 
     def get_attention(self):
         return self.temporal_encoder.get_attention()

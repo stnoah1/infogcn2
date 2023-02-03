@@ -260,6 +260,9 @@ class TemporalEncoder(nn.Module):
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout, A=A, num_point=num_point, use_mask=True, SAGC_proj=SAGC_proj)
         self.to_latent = nn.Identity()
+        self.fc_mu = nn.Linear(dim, dim)
+        self.fc_var = nn.Linear(dim, dim)
+        self.noise_ratio = 0.1
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -271,6 +274,17 @@ class TemporalEncoder(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
+    def latent_sample(self, mu, logvar):
+        if self.training:
+            std = logvar.mul(self.noise_ratio).exp()
+            # std = logvar.exp()
+            std = torch.clamp(std, max=100)
+            # std = std / (torch.norm(std, 2, dim=1, keepdim=True) + 1e-4)
+            eps = torch.empty_like(std).normal_()
+            return eps.mul(std) + mu
+        else:
+            return mu
+
     def forward(self, x):
         """
         in : b t c h w
@@ -281,8 +295,10 @@ class TemporalEncoder(nn.Module):
         x = x + self.pe[:, :T, :]
         x = self.transformer(x)
         x = self.to_latent(x)
+        x_mu = self.fc_mu(x)
+        x_var = self.fc_var(x)
         x = rearrange(x, '(b v) t c -> b c t v', v=V)
-        return x
+        return x_mu, x_var
 
     def get_attention(self):
         return self.transformer._attns
