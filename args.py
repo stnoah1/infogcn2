@@ -75,7 +75,7 @@ def get_parser():
     parser.add_argument('--lambda_1', type=float, default=1e+0)
     parser.add_argument('--lambda_2', type=float, default=1e+0)
     parser.add_argument('--lambda_3', type=float, default=1e+1)
-    parser.add_argument('--lambda_4', type=float, default=0e+1)
+    parser.add_argument('--lambda_4', type=float, default=1e+0)
 
     # apex
     parser.add_argument('--half', type=str2bool, default=True, help='Use half-precision (FP16) training')

@@ -246,6 +246,9 @@ class Processor():
 
             if self.arg.lambda_2:
                 N_rec = x_hat.size(0)//B
+                if self.vel:
+                    x[:, :-1] = x[:, 1:] - x[:, :-1]
+                    x[:, -1] = 0
                 x_gt = x.unsqueeze(0).expand(N_rec, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
                 mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec)
                 for i in range(N_rec):

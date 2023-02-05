@@ -109,6 +109,7 @@ class SODE(nn.Module):
         shift_idx = shift_idx - torch.arange(1, n_step+1, dtype=int).view(n_step,1,1,1,1)
         self.mask = torch.triu(torch.ones(n_step, T), diagonal=1).view(n_step,1,T,1,1)
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
+        self.noise_ratio = 1e-3
         self.shift_idx = shift_idx%T
         self.temporal_encoder = TemporalEncoder(
             seq_len=T,
@@ -217,6 +218,17 @@ class SODE(nn.Module):
             raise Exception("kldiv_z0 is Nan!")
         loss = kldiv_z0.mean()
         return loss
+
+    def latent_sample(self, mu, logvar):
+        if self.training:
+            std = logvar.mul(self.noise_ratio).exp()
+            # std = logvar.exp()
+            std = torch.clamp(std, max=100)
+            # std = std / (torch.norm(std, 2, dim=1, keepdim=True) + 1e-4)
+            eps = torch.empty_like(std).normal_()
+            return eps.mul(std) + mu
+        else:
+            return mu
 
     def forward(self, x):
         N, C, T, V, M = x.size()
