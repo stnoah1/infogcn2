@@ -91,7 +91,7 @@ class SODE(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
                  T=64, n_step=1, dilation=1, SAGC_proj=True,
-                 n_sample=1, backbone='transformer'):
+                 n_sample=1, backbone='transformer', kl_div=False, dropout=0.0):
         super(SODE, self).__init__()
 
         self.Graph = import_class(graph)()
@@ -107,6 +107,10 @@ class SODE(nn.Module):
         shift_idx = torch.arange(0, T, dtype=int).view(1,T,1,1)
         shift_idx = repeat(shift_idx, 'b t c v -> n b t c v', n=n_step)
         shift_idx = shift_idx - torch.arange(1, n_step+1, dtype=int).view(n_step,1,1,1,1)
+        idx = [int(math.ceil(64*i*0.1))+3 for i in range(11)]
+        idx[0] = 0
+        idx[-1] = 64
+        self.idx = idx
         self.mask = torch.triu(torch.ones(n_step, T), diagonal=1).view(n_step,1,T,1,1)
         self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
         self.noise_ratio = 1e-3
@@ -121,11 +125,14 @@ class SODE(nn.Module):
             device=device,
             A=A,
             num_point=num_point,
-            SAGC_proj=SAGC_proj
+            SAGC_proj=SAGC_proj,
+            dropout=dropout,
+            kl_div=kl_div,
         ) if backbone == "transformer" else Encoder_z0_RNN(base_channel, A, device)
         self.n_sample = n_sample
         self.n_step = n_step
         self.arange_n_step = torch.arange(self.n_step+1)
+        self.kl_div = kl_div
         print(backbone)
 
         ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), N=n_step, T=T).to(device)
@@ -241,8 +248,12 @@ class SODE(nn.Module):
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
         z_mu, z_std = self.temporal_encoder(x)
-        kl_div = self.KL_div(z_mu, z_std)
-        z = self.latent_sample(z_mu, z_std)
+        if self.kl_div:
+            z = self.latent_sample(z_mu, z_std)
+            kl_div = self.KL_div(z_mu, z_std)
+        else:
+            z = z_mu
+            kl_div = torch.tensor(0.0)
 
         # extrapolation
         z_0, z_hat, z_hat_shifted = self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
@@ -262,8 +273,7 @@ class SODE(nn.Module):
 
         y_lst = []
         for i in range(10):
-            int(math.ceil(64*i*0.1))
-            y_lst.append(self.classifier_lst[i](z_cls[:,:,int(math.ceil(64*i*0.1)):int(math.ceil(64*(i+1)*0.1))])) # N, num_cls, T
+            y_lst.append(self.classifier_lst[i](z_cls[:,:,self.idx[i]:self.idx[i+1]])) # N, num_cls, T
         y = torch.cat(y_lst, dim=-1)
         y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
         return y, x_hat, z_0, z_hat_shifted, kl_div

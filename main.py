@@ -132,6 +132,8 @@ class Processor():
             dilation=self.arg.dilation,
             SAGC_proj=self.arg.SAGC_proj,
             backbone=self.arg.backbone,
+            kl_div = self.arg.lambda_4,
+            dropout = self.arg.dropout,
         )
         self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
         self.recon_loss = masked_recon_loss
@@ -246,9 +248,9 @@ class Processor():
 
             if self.arg.lambda_2:
                 N_rec = x_hat.size(0)//B
-                if self.vel:
-                    x[:, :-1] = x[:, 1:] - x[:, :-1]
-                    x[:, -1] = 0
+                if self.arg.use_vel:
+                    x[:, :, :-1] = x[:, :, 1:] - x[:, :, :-1]
+                    x[:, :, -1] = 0
                 x_gt = x.unsqueeze(0).expand(N_rec, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
                 mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec)
                 for i in range(N_rec):
@@ -361,7 +363,11 @@ class Processor():
                         else:
                             mask_recon[i,:,:,:i,:,:] = 0.
                     mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
-                    recon_loss = self.recon_loss(x_hat, x_gt, mask_recon)
+                    if self.arg.use_vel:
+                        x_hat[:, :, 1:] = x_hat[:, :, :-1]
+                        x_hat[:, :, 0] = 0.
+                        x_hat = x_hat + x_gt.mean(2,keepdim=True)
+                    recon_loss = self.arg.lambda_2 * self.recon_loss(x_hat, x_gt, mask_recon)
 
                     N_step = self.arg.n_step
                     B_,C,T,V = z_0.shape

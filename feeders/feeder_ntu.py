@@ -102,9 +102,9 @@ class Feeder(Dataset):
         mask = (abs(data_numpy.sum(0, keepdims=True).sum(2, keepdims=True)) > 0)
         if self.random_rot:
             data_numpy = tools.random_rot(data_numpy)
-        if self.vel:
-            data_numpy[:, :-1] = data_numpy[:, 1:] - data_numpy[:, :-1]
-            data_numpy[:, -1] = 0
+        # if self.vel:
+            # data_numpy[:, :-1] = data_numpy[:, 1:] - data_numpy[:, :-1]
+            # data_numpy[:, -1] = 0
         return data_numpy, label, mask, index
 
     def top_k(self, score, top_k):

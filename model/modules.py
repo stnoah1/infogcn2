@@ -253,15 +253,17 @@ def PositionalEncoding(d_model: int, dropout: float = 0.1, max_len: int = 5000):
 
 
 class TemporalEncoder(nn.Module):
-    def __init__(self, seq_len, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0., A=1, num_point=25, SAGC_proj=True, device='cuda'):
+    def __init__(self, seq_len, dim, depth, heads, mlp_dim, dim_head=64, dropout=0., emb_dropout=0., A=1, num_point=25, SAGC_proj=True, device='cuda', kl_div=False):
         super().__init__()
 
         self.pe = PositionalEncoding(d_model=dim, max_len=seq_len).to(device)
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, seq_len, dropout, A=A, num_point=num_point, use_mask=True, SAGC_proj=SAGC_proj)
         self.to_latent = nn.Identity()
-        self.fc_mu = nn.Linear(dim, dim)
-        self.fc_var = nn.Linear(dim, dim)
+        self.kl_div = kl_div
+        if self.kl_div:
+            self.fc_mu = nn.Linear(dim, dim)
+            self.fc_var = nn.Linear(dim, dim)
         self.apply(self._init_weights)
 
     def _init_weights(self, module):
@@ -283,10 +285,15 @@ class TemporalEncoder(nn.Module):
         x = x + self.pe[:, :T, :]
         x = self.transformer(x)
         x = self.to_latent(x)
-        x_mu = self.fc_mu(x)
-        x_var = abs(self.fc_var(x)) + 1e-5
-        x_mu = rearrange(x_mu, '(b v) t c -> b c t v', v=V)
-        x_var = rearrange(x_var, '(b v) t c -> b c t v', v=V)
+        if self.kl_div:
+            x_mu = self.fc_mu(x)
+            x_var = abs(self.fc_var(x)) + 1e-5
+            x_mu = rearrange(x_mu, '(b v) t c -> b c t v', v=V)
+            x_var = rearrange(x_var, '(b v) t c -> b c t v', v=V)
+        else:
+            x_mu = x
+            x_var = 0.
+            x_mu = rearrange(x_mu, '(b v) t c -> b c t v', v=V)
         return x_mu, x_var
 
     def get_attention(self):

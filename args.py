@@ -59,6 +59,7 @@ def get_parser():
     parser.add_argument('--n_sample', type=int, default="1", help='')
     parser.add_argument('--SAGC_proj', type=str2bool, default=True, help='')
     parser.add_argument('--backbone', type=str, default="transformer", help='')
+    parser.add_argument('--dropout', type=float, default=0.0, help='')
 
     # optim
     parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
