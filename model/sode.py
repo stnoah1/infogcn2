@@ -39,6 +39,26 @@ class DiffeqSolver(nn.Module):
         return pred_y
 
 
+class DiffeqSolver10(nn.Module):
+    def __init__(self, ode_funcs, method, odeint_rtol=1e-4, odeint_atol=1e-5):
+        super(DiffeqSolver10, self).__init__()
+
+        self.ode_method = method
+        self.ode_funcs = ode_funcs
+
+        self.odeint_rtol = odeint_rtol
+        self.odeint_atol = odeint_atol
+
+    def forward(self, first_point, time_steps_to_predict, i):
+        """
+        # Decode the trajectory through ODE Solver
+        """
+        pred_y = odeint(self.ode_funcs[i], first_point, time_steps_to_predict,
+                        rtol=self.odeint_rtol, atol=self.odeint_atol,
+                        method=self.ode_method)
+        return pred_y
+
+
 class ODEFunc(nn.Module):
     def __init__(self, dim, A, N, T=64):
         super(ODEFunc, self).__init__()
@@ -135,13 +155,30 @@ class SODE(nn.Module):
         self.kl_div = kl_div
         print(backbone)
 
-        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), N=n_step, T=T).to(device)
-        self.diffeq_solver = DiffeqSolver(ode_func, method=method) if method != "RNN" else \
+        A_norm = torch.from_numpy(self.Graph.A_norm)
+        Ts = [self.idx[i+1] - self.idx[i] for i in range(10)]
+        of0 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[0]).to(device)
+        of1 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[1]).to(device)
+        of2 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[2]).to(device)
+        of3 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[3]).to(device)
+        of4 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[4]).to(device)
+        of5 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[5]).to(device)
+        of6 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[6]).to(device)
+        of7 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[7]).to(device)
+        of8 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[8]).to(device)
+        of9 = ODEFunc(base_channel, A_norm, N=n_step, T=Ts[9]).to(device)
+        of_lst = [of0, of1, of2, of3, of4, of5, of6, of7, of8, of9]
+        self.diffeq_solver = DiffeqSolver10(of_lst, method=method) if method != "RNN" else \
             RNN(base_channel, A, n_step)
 
+        # A_norm = torch.from_numpy(self.Graph.A_norm)
+        # of0 = ODEFunc(base_channel, A_norm, N=n_step, T=T).to(device)
+        # self.diffeq_solver = DiffeqSolver(of0, method=method) if method != "RNN" else \
+            # RNN(base_channel, A, n_step)
+
         self.recon_decoder = nn.Sequential(
-            GCN(base_channel, base_channel, A),
-            GCN(base_channel, base_channel, A),
+            GCN(base_channel, 2*base_channel, A),
+            GCN(2*base_channel, base_channel, A),
             nn.Conv2d(base_channel, 3, 1),
         )
 
@@ -178,7 +215,6 @@ class SODE(nn.Module):
         '''
         B, C, T, V = z_0.size()
         z_0 = rearrange(z_0, "b c t v -> (b t) c v")
-
         zs = self.diffeq_solver(z_0, t) # z_i = 2, (b t), c, v
         zs = rearrange(zs, 'n (b t) c v -> n b t c v', t=T)
         z_hat = zs[1:]
@@ -187,6 +223,26 @@ class SODE(nn.Module):
         z_hat_shifted = rearrange(z_hat_shifted, 'n b t c v -> (n b) c t v')
         z_hat = rearrange(z_hat, 'n b t c v -> (n b) c t v')
         z_0 = rearrange(z_0, '(b t) c v -> b c t v', t=T)
+
+        return z_0, z_hat, z_hat_shifted
+
+    def extrapolate10(self, z_0, t):
+        '''
+        z : n c t v
+        '''
+        B, C, T, V = z_0.size()
+        z_lst = []
+        for i in range(10):
+            z_i = rearrange(z_0[:,:,self.idx[i]:self.idx[i+1]], "b c t v -> (b t) c v")
+            z_i = self.diffeq_solver(z_i, t, i) # z_i = 2, (b t), c, v
+            z_i = rearrange(z_i, 'n (b t) c v -> n b t c v', b=B)
+            z_lst.append(z_i)
+        zs = torch.cat(z_lst, dim=2)
+        z_hat = zs[1:]
+        z_hat_shifted = torch.gather(z_hat, dim=2, index=self.shift_idx.expand_as(z_hat).to(z_hat.device).long())
+        z_hat_shifted = self.mask.to(z_hat_shifted.device) * z_hat
+        z_hat_shifted = rearrange(z_hat_shifted, 'n b t c v -> (n b) c t v')
+        z_hat = rearrange(z_hat, 'n b t c v -> (n b) c t v')
 
         return z_0, z_hat, z_hat_shifted
 
@@ -256,7 +312,8 @@ class SODE(nn.Module):
             kl_div = torch.tensor(0.0)
 
         # extrapolation
-        z_0, z_hat, z_hat_shifted = self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
+        # z_0, z_hat, z_hat_shifted = self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
+        z_0, z_hat, z_hat_shifted = self.extrapolate10(z, self.arange_n_step.to(z.device).to(z.dtype))
 
         # reconstruction
         x_hat = self.recon_decoder(z_hat_shifted)

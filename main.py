@@ -228,7 +228,6 @@ class Processor():
         self.log_recon_2d_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
         lr = self.adjust_learning_rate(epoch)
-        idx10 = np.array([int(math.ceil(64*ratio*0.1))-1 for ratio in range(10)])
         tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
         for x, y, mask, index in tbar:
