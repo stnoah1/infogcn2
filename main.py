@@ -91,6 +91,7 @@ class Processor():
                 random_rot=self.arg.random_rot,
                 sort=False,
                 A=A_vector,
+                window_size=self.arg.window_size,
             ),
             batch_size=self.arg.batch_size,
             shuffle=True,
@@ -106,6 +107,7 @@ class Processor():
                 p_interval=[0.95],
                 vel=self.arg.use_vel,
                 A=A_vector,
+                window_size=self.arg.window_size,
             ),
             batch_size=self.arg.test_batch_size,
             shuffle=False,
@@ -132,8 +134,9 @@ class Processor():
             dilation=self.arg.dilation,
             SAGC_proj=self.arg.SAGC_proj,
             backbone=self.arg.backbone,
+            num_cls=self.arg.num_cls,
         )
-        self.cls_loss = LabelSmoothingCrossEntropy().to(self.device)
+        self.cls_loss = LabelSmoothingCrossEntropy(T=self.arg.window_size).to(self.device)
         self.recon_loss = masked_recon_loss
 
         if self.arg.weights:
@@ -226,7 +229,7 @@ class Processor():
         self.log_recon_2d_loss.reset()
         self.print_log('Training epoch: {}'.format(epoch + 1))
         lr = self.adjust_learning_rate(epoch)
-        idx10 = np.array([int(math.ceil(64*ratio*0.1))-1 for ratio in range(10)])
+        idx10 = np.array([int(math.ceil(self.arg.window_size*ratio*0.1))-1 for ratio in range(10)])
         tbar = tqdm(self.data_loader['train'], dynamic_ncols=True)
 
         for x, y, mask, index in tbar:
@@ -236,9 +239,9 @@ class Processor():
             y = y.long().to(self.device)
             mask = mask.long().to(self.device)
             y_hat, x_hat, z_0, z_hat, kl_div = self.model(x)
+            N_cls = y_hat.size(0)//B
 
             if self.arg.lambda_1:
-                N_cls = y_hat.size(0)//B
                 y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2))
                 y_hat_ = rearrange(y_hat, "b i t -> (b t) i")
 
@@ -247,12 +250,15 @@ class Processor():
             if self.arg.lambda_2:
                 N_rec = x_hat.size(0)//B
                 x_gt = x.unsqueeze(0).expand(N_rec, B, C, T, V, M).reshape(N_rec*B, C, T, V, M)
-                mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec)
+                mask_recon = repeat(mask, 'b c t v m -> n b c t v m', n=N_rec).clone()
                 for i in range(N_rec):
                     if N_rec == self.arg.n_step:
                         mask_recon[i,:,:,:i+1,:,:] = 0.
                     else:
                         mask_recon[i,:,:,:i,:,:] = 0.
+                    if self.arg.n_min <= i <= self.arg.n_step:
+                        mask_recon[self.arg.n_step + self.arg.n_min - (i+1),:,:,int(T*(i+1 - self.arg.n_min)/(self.arg.n_step - self.arg.n_min + 1))+i:,:,:] = 0
+                # import ipdb; ipdb.set_trace()
                 mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
                 recon_loss = self.arg.lambda_2 * self.recon_loss(x_hat, x_gt, mask_recon)
 
@@ -260,8 +266,8 @@ class Processor():
                 N_step = self.arg.n_step
                 B_,C,T,V = z_0.shape
                 z_0 = repeat(z_0, 'b c t v-> n b c t v', n=N_step)
-                mask_feature = (z_hat != 0.)
                 z_hat = z_hat.view(N_step, B_, C, T, V)
+                mask_feature = (z_hat != 0.)
                 feature_loss = self.arg.lambda_3 * self.recon_loss(z_hat, z_0, mask_feature)
 
             if self.arg.lambda_4:
@@ -332,6 +338,7 @@ class Processor():
             step = 0
             time_lst = []
             tbar = tqdm(self.data_loader[ln], dynamic_ncols=True)
+            idx10 = np.array([int(math.ceil(self.arg.window_size*0.1*i))-1 for i in range(1,11)])
             for x, y, mask, index in tbar:
                 label_list.append(y)
                 with torch.no_grad():
@@ -366,12 +373,12 @@ class Processor():
                         # np.savez(f, z=np.array(z_cls.cpu()), y=np.array(y_.cpu()), y_hat=np.array(y_hat.cpu()))
                     # import ipdb; ipdb.set_trace()
                     z_0 = repeat(z_0, 'b c t v-> n b c t v', n=N_step)
-                    mask_feature = (z_hat != 0.)
                     z_hat = z_hat.view(N_step, B_, C, T, V)
-                    feature_loss = self.arg.lambda_3 * self.recon_loss(z_0, z_hat, mask_feature)
+                    mask_feature = (z_hat != 0.)
+                    feature_loss = self.recon_loss(z_0, z_hat, mask_feature)
 
                     loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss
-                    score_frag.append(y_hat.data.cpu().numpy())
+                    score_frag.append(y_hat.view(B,T,60)[:,idx10,:].data.cpu().numpy())
                     loss_value.append(loss.data.item())
                     cls_loss_value.append(cls_loss.data.item())
 
@@ -414,6 +421,11 @@ class Processor():
 
             score_dict = dict(
                 zip(self.data_loader[ln].dataset.sample_name, score))
+
+            if save_score and ((epoch+1) >= (self.arg.num_epoch-10)):
+                with open('{}/epoch{}_{}_score.pkl'.format(
+                        self.arg.work_dir, epoch + 1, ln), 'wb') as f:
+                    pickle.dump(score_dict, f)
 
     def start(self):
         if self.arg.phase == 'train':

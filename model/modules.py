@@ -295,10 +295,10 @@ class TemporalEncoder(nn.Module):
         x = x + self.pe[:, :T, :]
         x = self.transformer(x)
         x = self.to_latent(x)
-        x_mu = self.fc_mu(x)
-        x_var = self.fc_var(x)
+        # x_mu = self.fc_mu(x)
+        # x_var = self.fc_var(x)
         x = rearrange(x, '(b v) t c -> b c t v', v=V)
-        return x_mu, x_var
+        return x
 
     def get_attention(self):
         return self.transformer._attns

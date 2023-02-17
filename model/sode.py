@@ -49,15 +49,16 @@ class ODEFunc(nn.Module):
         self.conv1 = nn.Conv1d(dim, dim, 1)
         self.conv2 = nn.Conv1d(dim, dim, 1)
         self.proj = nn.Conv1d(dim, dim, 1)
-        self.temporal_pe = self.init_pe(T+N, dim)
-        self.index = torch.arange(T).unsqueeze(-1).expand(T, dim)
+        with torch.no_grad():
+            self.temporal_pe = self.init_pe(T+N, dim)
+            self.index = torch.arange(T).unsqueeze(-1).expand(T, dim)
 
     def forward(self, t, x, backwards=False):
         x = self.add_pe(x, t) # TODO T dimension wise.
-        x = torch.einsum('vu,ncu->ncv', self.A.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,ncu->ncv', self.A.to(x.dtype), x)
         x = self.conv1(x)
         x = self.relu(x)
-        x = torch.einsum('vu,ncu->ncv', self.A.to(x.device).to(x.dtype), x)
+        x = torch.einsum('vu,ncu->ncv', self.A.to(x.dtype), x)
         x = self.conv2(x)
         x = self.relu(x)
         x = self.proj(x)
@@ -90,26 +91,32 @@ class ODEFunc(nn.Module):
 class SODE(nn.Module):
     def __init__(self, num_class=60, num_point=25, num_person=2, ode_method='rk4',
                  graph=None, in_channels=3, num_head=3, k=0, base_channel=64, depth=4, device='cuda',
-                 T=64, n_step=1, dilation=1, SAGC_proj=True,
+                 T=64, n_step=1, dilation=1, SAGC_proj=True, num_cls=10,
                  n_sample=1, backbone='transformer'):
         super(SODE, self).__init__()
 
         self.Graph = import_class(graph)()
-        A = np.stack([self.Graph.A_norm] * num_head, axis=0)
-        self.T = T
-        method = ode_method
-        self.arange = torch.arange(T).view(1,1,T)+1
-        self.num_class = num_class
-        self.num_point = num_point
-        self.num_person = num_person
+        with torch.no_grad():
+            A = np.stack([self.Graph.A_norm] * num_head, axis=0)
+            self.T = T
+            self.arange = torch.arange(T).view(1,1,T)+1
+            shift_idx = torch.arange(0, T, dtype=int).view(1,T,1,1)
+            shift_idx = repeat(shift_idx, 'b t c v -> n b t c v', n=n_step)
+            shift_idx = shift_idx - torch.arange(1, n_step+1, dtype=int).view(n_step,1,1,1,1)
+            self.mask = torch.triu(torch.ones(n_step, T), diagonal=1).view(n_step,1,T,1,1).cuda()
+            self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
+            self.shift_idx = shift_idx.cuda()%T
+            self.num_class = num_class
+            self.num_point = num_point
+            self.num_person = num_person
+            self.cls_idx = [int(math.ceil(T*i/num_cls)) for i in range(num_cls+1)]
+            self.cls_idx[0] = 0
+            self.cls_idx[-1] = T
+            self.zero = torch.tensor(0.0).cuda()
+            self.n_step = n_step
+            self.arange_n_step = torch.arange(n_step+1).cuda()
         self.to_joint_embedding = nn.Linear(in_channels, base_channel)
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
-        shift_idx = torch.arange(0, T, dtype=int).view(1,T,1,1)
-        shift_idx = repeat(shift_idx, 'b t c v -> n b t c v', n=n_step)
-        shift_idx = shift_idx - torch.arange(1, n_step+1, dtype=int).view(n_step,1,1,1,1)
-        self.mask = torch.triu(torch.ones(n_step, T), diagonal=1).view(n_step,1,T,1,1)
-        self.z0_prior = Normal(torch.Tensor([0.0]).to(device), torch.Tensor([1.]).to(device))
-        self.shift_idx = shift_idx%T
         self.temporal_encoder = TemporalEncoder(
             seq_len=T,
             dim=base_channel,
@@ -123,11 +130,10 @@ class SODE(nn.Module):
             SAGC_proj=SAGC_proj
         ) if backbone == "transformer" else Encoder_z0_RNN(base_channel, A, device)
         self.n_sample = n_sample
-        self.n_step = n_step
-        self.arange_n_step = torch.arange(self.n_step+1)
         print(backbone)
 
-        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm), N=n_step, T=T).to(device)
+        method = ode_method
+        ode_func = ODEFunc(base_channel, torch.from_numpy(self.Graph.A_norm).cuda(), N=n_step, T=T).to(device)
         self.diffeq_solver = DiffeqSolver(ode_func, method=method) if method != "RNN" else \
             RNN(base_channel, A, n_step)
 
@@ -161,6 +167,7 @@ class SODE(nn.Module):
         self.c7 = nn.Conv1d(out_dim, num_class, 1)
         self.c8 = nn.Conv1d(out_dim, num_class, 1)
         self.c9 = nn.Conv1d(out_dim, num_class, 1)
+        self.num_cls = num_cls
         self.classifier_lst = [self.c0,self.c1,self.c2,self.c3,self.c4,self.c5,self.c6,self.c7,self.c8,self.c9]
         self.spatial_pooling = torch.mean
 
@@ -174,8 +181,8 @@ class SODE(nn.Module):
         zs = self.diffeq_solver(z_0, t) # z_i = 2, (b t), c, v
         zs = rearrange(zs, 'n (b t) c v -> n b t c v', t=T)
         z_hat = zs[1:]
-        z_hat_shifted = torch.gather(z_hat, dim=2, index=self.shift_idx.expand_as(z_hat).to(z_hat.device).long())
-        z_hat_shifted = self.mask.to(z_hat_shifted.device) * z_hat
+        z_hat_shifted = torch.gather(z_hat, dim=2, index=self.shift_idx.expand_as(z_hat).long())
+        z_hat_shifted = self.mask * z_hat
         z_hat_shifted = rearrange(z_hat_shifted, 'n b t c v -> (n b) c t v')
         z_hat = rearrange(z_hat, 'n b t c v -> (n b) c t v')
         z_0 = rearrange(z_0, '(b t) c v -> b c t v', t=T)
@@ -228,12 +235,12 @@ class SODE(nn.Module):
 
         # encoding
         x = rearrange(x, '(n m t) v c -> (n m) c t v', m=M, n=N)
-        z_mu, z_std = self.temporal_encoder(x)
-        kl_div = self.KL_div(z_mu, z_std)
-        z = self.latent_sample(z_mu, z_std)
+        z = self.temporal_encoder(x)
+        # kl_div = self.KL_div(z_mu, z_std)
+        # z = self.latent_sample(z_mu, z_std)
 
         # extrapolation
-        z_0, z_hat, z_hat_shifted = self.extrapolate(z, self.arange_n_step.to(z.device).to(z.dtype))
+        z_0, z_hat, z_hat_shifted = self.extrapolate(z, self.arange_n_step.to(z.dtype))
 
         # reconstruction
         x_hat = self.recon_decoder(z_hat_shifted)
@@ -249,12 +256,11 @@ class SODE(nn.Module):
         z_cls = self.spatial_pooling(z_cls,dim=-1)
 
         y_lst = []
-        for i in range(10):
-            int(math.ceil(64*i*0.1))
-            y_lst.append(self.classifier_lst[i](z_cls[:,:,int(math.ceil(64*i*0.1)):int(math.ceil(64*(i+1)*0.1))])) # N, num_cls, T
+        for i in range(self.num_cls):
+            y_lst.append(self.classifier_lst[i](z_cls[:,:,self.cls_idx[i]:self.cls_idx[i+1]])) # N, num_cls, T
         y = torch.cat(y_lst, dim=-1)
         y = rearrange(y, '(n l) c t -> n l c t', l=self.n_sample).mean(1)
-        return y, x_hat, z_0, z_hat_shifted, kl_div
+        return y, x_hat, z_0, z_hat_shifted, self.zero
 
     def get_attention(self):
         return self.temporal_encoder.get_attention()
