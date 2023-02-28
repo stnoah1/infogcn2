@@ -256,9 +256,6 @@ class Processor():
                         mask_recon[i,:,:,:i+1,:,:] = 0.
                     else:
                         mask_recon[i,:,:,:i,:,:] = 0.
-                    if self.arg.n_min <= i <= self.arg.n_step:
-                        mask_recon[self.arg.n_step + self.arg.n_min - (i+1),:,:,int(T*(i+1 - self.arg.n_min)/(self.arg.n_step - self.arg.n_min + 1))+i:,:,:] = 0
-                # import ipdb; ipdb.set_trace()
                 mask_recon = rearrange(mask_recon, 'n b c t v m -> (n b) c t v m')
                 recon_loss = self.arg.lambda_2 * self.recon_loss(x_hat, x_gt, mask_recon)
 
@@ -378,7 +375,7 @@ class Processor():
                     feature_loss = self.recon_loss(z_0, z_hat, mask_feature)
 
                     loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss
-                    score_frag.append(y_hat.view(B,T,60)[:,idx10,:].data.cpu().numpy())
+                    score_frag.append(y_hat.view(B,T,-1)[:,idx10,:].data.cpu().numpy())
                     loss_value.append(loss.data.item())
                     cls_loss_value.append(cls_loss.data.item())
 
@@ -402,7 +399,7 @@ class Processor():
                     f"FT:{self.log_feature_loss.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 )
-            # print("--- %s seconds ---" % mean(time_lst))
+            # print("--- %s seconds ---" % np.mean(time_lst))
             AUC = np.mean([self.log_acc[i].avg.cpu().numpy() for i in range(10)])
             eval_dict = {
                 "eval/Recon2D_loss":self.log_recon_loss.avg,
