@@ -16,6 +16,7 @@ from collections import OrderedDict
 import apex
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import torch_dct as dct
 import numpy as np
@@ -265,7 +266,7 @@ class Processor():
                 z_0 = repeat(z_0, 'b c t v-> n b c t v', n=N_step)
                 z_hat = z_hat.view(N_step, B_, C, T, V)
                 mask_feature = (z_hat != 0.)
-                feature_loss = self.arg.lambda_3 * self.recon_loss(z_hat, z_0, mask_feature)
+                feature_loss = self.arg.lambda_3 * self.recon_loss(z_hat, z_0, mask_feature)# F.mse_loss(z_0, z_hat)#
 
             if self.arg.lambda_4:
                 kl_div = self.arg.lambda_4 * kl_div
@@ -380,6 +381,7 @@ class Processor():
                     cls_loss_value.append(cls_loss.data.item())
 
                     _, predict_label = torch.max(y_hat.data, 1)
+                    pred_list.append(predict_label.view(-1,52).data.cpu().numpy())
                     step += 1
                 for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\
@@ -412,6 +414,14 @@ class Processor():
             wandb.log(eval_dict)
 
             score = np.concatenate(score_frag)
+            # pred_list = np.concatenate(pred_list)
+            # label_list = np.concatenate(label_list)
+            # with open('result/pred_lst_{}_n{}_new.pkl'.format(
+                    # self.arg.datacase, self.arg.n_step), 'wb') as f:
+                # pickle.dump(pred_list, f)
+            # with open('result/label_list_{}.pkl'.format(
+                    # self.arg.datacase), 'wb') as f:
+                # pickle.dump(label_list, f)
 
             if 'ucla' in self.arg.feeder:
                 self.data_loader[ln].dataset.sample_name = np.arange(len(score))

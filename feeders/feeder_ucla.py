@@ -48,8 +48,8 @@ class Feeder(Dataset):
                 json_file = json.load(f)
             skeletons = json_file['skeletons']
             value = np.array(skeletons)
-            if self.A is not None:
-                value = np.array(self.A) @ value
+            # if self.A is not None:
+                # value = np.array(self.A) @ value
             self.data.append(value)
 
     def get_mean_map(self):

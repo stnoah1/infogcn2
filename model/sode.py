@@ -157,6 +157,7 @@ class SODE(nn.Module):
             GCN(mid_dim, out_dim, A),
         )
 
+        # amp is not working with for loop.
         self.c0 = nn.Conv1d(out_dim, num_class, 1)
         self.c1 = nn.Conv1d(out_dim, num_class, 1)
         self.c2 = nn.Conv1d(out_dim, num_class, 1)
