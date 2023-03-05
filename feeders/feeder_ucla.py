@@ -33,7 +33,7 @@ class Feeder(Dataset):
         self.window_size = window_size
         self.normalization = normalization
         self.use_mmap = use_mmap
-        self.repeat = repeat
+        self.repeat = repeat if split=="train" else 1
         self.A = A
         self.load_data()
         if normalization:
