@@ -9,7 +9,6 @@ import pickle
 import random
 import resource
 import time
-from ignite.metrics import SSIM
 
 from collections import OrderedDict
 
@@ -381,7 +380,7 @@ class Processor():
                     cls_loss_value.append(cls_loss.data.item())
 
                     _, predict_label = torch.max(y_hat.data, 1)
-                    pred_list.append(predict_label.view(-1,52).data.cpu().numpy())
+                    # pred_list.append(predict_label.view(-1,T).data.cpu().numpy())
                     step += 1
                 for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\

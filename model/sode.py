@@ -182,8 +182,8 @@ class SODE(nn.Module):
         zs = self.diffeq_solver(z_0, t) # z_i = 2, (b t), c, v
         zs = rearrange(zs, 'n (b t) c v -> n b t c v', t=T)
         z_hat = zs[1:]
-        z_hat_shifted = torch.gather(z_hat, dim=2, index=self.shift_idx.expand_as(z_hat).long())
-        z_hat_shifted = self.mask * z_hat
+        z_hat_shifted = torch.gather(z_hat.clone(), dim=2, index=self.shift_idx.expand_as(z_hat).long())
+        z_hat_shifted = self.mask * z_hat_shifted
         z_hat_shifted = rearrange(z_hat_shifted, 'n b t c v -> (n b) c t v')
         z_hat = rearrange(z_hat, 'n b t c v -> (n b) c t v')
         z_0 = rearrange(z_0, '(b t) c v -> b c t v', t=T)

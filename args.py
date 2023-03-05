@@ -62,7 +62,7 @@ def get_parser():
     parser.add_argument('--num_cls', type=int, default=1, help='')
 
     # optim
-    parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
+    parser.add_argument('--base_lr', type=float, default=1e-1, help='initial learning rate')
     parser.add_argument('--step', type=int, default=[50, 60], nargs='+', help='the epoch where optimizer reduce the learning rate')
     parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
     parser.add_argument('--nesterov', type=str2bool, default=True, help='use nesterov or not')
