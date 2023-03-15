@@ -345,10 +345,7 @@ class Processor():
                     y_ = y.clone()
                     mask = mask.long().to(self.device)
                     x_gt = x
-                    # start_time = time.time()
                     y_hat, x_hat, z_0, z_hat, kl_div = self.model(x)
-                    # print("--- %s seconds ---" % (time.time() - start_time))
-                    # time_lst.append(time.time() - start_time)
                     N_cls = y_hat.size(0)//B
                     y = y.view(1,B,1).expand(N_cls, B, y_hat.size(2)).reshape(-1)
                     y_hat = rearrange(y_hat, "b i t -> (b t) i")
@@ -366,9 +363,6 @@ class Processor():
 
                     N_step = self.arg.n_step
                     B_,C,T,V = z_0.shape
-                    # with open('result/eval.npz', 'wb') as f:
-                        # np.savez(f, z=np.array(z_cls.cpu()), y=np.array(y_.cpu()), y_hat=np.array(y_hat.cpu()))
-                    # import ipdb; ipdb.set_trace()
                     z_0 = repeat(z_0, 'b c t v-> n b c t v', n=N_step)
                     z_hat = z_hat.view(N_step, B_, C, T, V)
                     mask_feature = (z_hat != 0.)
@@ -380,7 +374,6 @@ class Processor():
                     cls_loss_value.append(cls_loss.data.item())
 
                     _, predict_label = torch.max(y_hat.data, 1)
-                    # pred_list.append(predict_label.view(-1,T).data.cpu().numpy())
                     step += 1
                 for i, ratio in enumerate([(i+1)/10 for i in range(10)]):
                     self.log_acc[i].update((predict_label == y.data)\
@@ -400,7 +393,6 @@ class Processor():
                     f"FT:{self.log_feature_loss.avg:.3f}, " \
                     f"RECON:{self.log_recon_loss.avg:.5f}, " \
                 )
-            # print("--- %s seconds ---" % np.mean(time_lst))
             AUC = np.mean([self.log_acc[i].avg.cpu().numpy() for i in range(10)])
             eval_dict = {
                 "eval/Recon2D_loss":self.log_recon_loss.avg,
@@ -413,14 +405,6 @@ class Processor():
             wandb.log(eval_dict)
 
             score = np.concatenate(score_frag)
-            # pred_list = np.concatenate(pred_list)
-            # label_list = np.concatenate(label_list)
-            # with open('result/pred_lst_{}_n{}_new.pkl'.format(
-                    # self.arg.datacase, self.arg.n_step), 'wb') as f:
-                # pickle.dump(pred_list, f)
-            # with open('result/label_list_{}.pkl'.format(
-                    # self.arg.datacase), 'wb') as f:
-                # pickle.dump(label_list, f)
 
             if 'ucla' in self.arg.feeder:
                 self.data_loader[ln].dataset.sample_name = np.arange(len(score))

@@ -86,7 +86,7 @@ Put downloaded data into the following directory structure:
 ```
 python main.py --half=True --batch_size=32 --test_batch_size=64 \
     --step 50 60 --num_epoch=70 --num_worker=4 --dataset=NW-UCLA --num_class=10 \
-    --datacase=ucla --weight_decay=0.0005 --num_person=1 --num_point=20 --graph=graph.ucla.Graph \
+    --datacase=ucla --weight_decay=0.0003 --num_person=1 --num_point=20 --graph=graph.ucla.Graph \
     --feeder=feeders.feeder_ucla.Feeder --base_lr 1e-1 --base_channel 64 \
     --window_size 52 --lambda_1=1e-0 --lambda_2=1e-1 --lambda_3=1e-3 --n_step 3
 ```
