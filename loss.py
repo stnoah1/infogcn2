@@ -5,7 +5,12 @@ import torch.nn.functional as F
 from torch import linalg as LA
 
 def masked_recon_loss(x, x_hat, mask):
-    recon_loss = (F.mse_loss(x_hat, x, reduce=None) * mask).sum()\
+    recon_loss = (F.mse_loss(x_hat, x, reduction="none") * mask).sum()\
+        / mask.sum()
+    return recon_loss
+
+def cosine_similarity(x, x_hat, mask):
+    recon_loss = (1 - F.cosine_similarity(x - x[:,:,:,1:2], x_hat - x_hat[:,:,:,1:2], dim=1) * mask[:,0]).sum()\
         / mask.sum()
     return recon_loss
 
@@ -20,7 +25,7 @@ class ReconLoss(nn.Module):
         return loss.view(B, V).mean(-1).mean(-1)
 
 class LabelSmoothingCrossEntropy(nn.Module):
-    def __init__(self, smoothing=0.1):
+    def __init__(self, smoothing=0.1, T=None):
         super(LabelSmoothingCrossEntropy, self).__init__()
         self.smoothing = smoothing
 
@@ -32,3 +37,21 @@ class LabelSmoothingCrossEntropy(nn.Module):
         smooth_loss = -logprobs.mean(dim=-1)
         loss = confidence * nll_loss + self.smoothing * smooth_loss
         return loss.mean()
+
+
+# class LabelSmoothingCrossEntropy(nn.Module):
+    # def __init__(self, smoothing=0.1, T=64):
+        # super(LabelSmoothingCrossEntropy, self).__init__()
+        # weight = torch.arange(T, 0, -1).cuda()
+        # weight = (weight/T*10).int()/200 + smoothing
+        # self.T = T
+        # self.smoothing = weight
+
+    # def forward(self, x, target):
+        # confidence = 1. - self.smoothing.unsqueeze(0).expand(target.size(0)//self.T, self.T).reshape(-1)
+        # logprobs = F.log_softmax(x, dim=-1)
+        # nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
+        # nll_loss = nll_loss.squeeze(1)
+        # smooth_loss = -logprobs.mean(dim=-1)
+        # loss = confidence * nll_loss + self.smoothing.unsqueeze(0).expand(target.size(0)//self.T, self.T).reshape(-1) * smooth_loss
+        # return loss.mean()

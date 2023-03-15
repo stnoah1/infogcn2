@@ -28,7 +28,7 @@ def get_parser():
 
     # processor
     parser.add_argument('--phase', default='train', help='must be train or test')
-    parser.add_argument('--save_score', type=str2bool, default=False, help='if ture, the classification score will be stored')
+    parser.add_argument('--save_score', type=str2bool, default=True, help='if ture, the classification score will be stored')
 
     # visulize and debug
     parser.add_argument('--seed', type=int, default=1, help='random seed for pytorch')
@@ -46,7 +46,7 @@ def get_parser():
     parser.add_argument('--repeat', type=int, default=1, help='the number of repeat for data')
 
     # model
-    parser.add_argument('--window_size', type=int, default=52, help='window_size for reconstruction')
+    parser.add_argument('--window_size', type=int, default=64, help='window_size for reconstruction')
     parser.add_argument('--base_channel', type=int, default=64, help='hidden_demesion')
     parser.add_argument('--weights', default=None, help='the weights for network initialization')
     parser.add_argument('--ignore_weights', type=str, default=[], nargs='+', help='the name of weights which will be ignored in the initialization')
@@ -59,9 +59,10 @@ def get_parser():
     parser.add_argument('--n_sample', type=int, default="1", help='')
     parser.add_argument('--SAGC_proj', type=str2bool, default=True, help='')
     parser.add_argument('--backbone', type=str, default="transformer", help='')
+    parser.add_argument('--num_cls', type=int, default=1, help='')
 
     # optim
-    parser.add_argument('--base_lr', type=float, default=1e-4, help='initial learning rate')
+    parser.add_argument('--base_lr', type=float, default=1e-1, help='initial learning rate')
     parser.add_argument('--step', type=int, default=[50, 60], nargs='+', help='the epoch where optimizer reduce the learning rate')
     parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
     parser.add_argument('--nesterov', type=str2bool, default=True, help='use nesterov or not')
@@ -73,8 +74,10 @@ def get_parser():
     parser.add_argument('--lr_decay_rate', type=float, default=0.1, help='decay rate for learning rate')
     parser.add_argument('--warm_up_epoch', type=int, default=0)
     parser.add_argument('--lambda_1', type=float, default=1e+0)
-    parser.add_argument('--lambda_2', type=float, default=1e+0)
-    parser.add_argument('--lambda_3', type=float, default=1e+1)
+    parser.add_argument('--lambda_2', type=float, default=1e-1)
+    parser.add_argument('--lambda_3', type=float, default=1e-1)
+    parser.add_argument('--lambda_4', type=float, default=0e+0)
+    parser.add_argument('--lambda_5', type=float, default=0e-1)
 
     # apex
     parser.add_argument('--half', type=str2bool, default=True, help='Use half-precision (FP16) training')
@@ -82,6 +85,7 @@ def get_parser():
 
     # ODE
     parser.add_argument('--n_step', type=int, default=3, help='')
+    parser.add_argument('--n_min', type=int, default=3, help='')
     parser.add_argument('--dilation', type=int, default=1, help='')
     parser.add_argument('--ode_method', type=str, default="euler", help='')
 

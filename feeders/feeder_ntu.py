@@ -67,6 +67,7 @@ class Feeder(Dataset):
             self.data = self.data.reshape((N*T*2, 25, 3))
             self.data = np.array(self.A) @ self.data # x = N C T V M
         self.data = self.data.reshape(N, T, 2, 25, 3).transpose(0, 4, 1, 3, 2)
+        # self.data -= self.data[:,:,:,1:2]
 
     def get_n_per_class(self):
         self.n_per_cls = np.zeros(len(self.label), dtype=int)

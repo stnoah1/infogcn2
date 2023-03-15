@@ -33,7 +33,8 @@ class Feeder(Dataset):
         self.window_size = window_size
         self.normalization = normalization
         self.use_mmap = use_mmap
-        self.repeat = repeat
+        self.repeat = repeat if split=="train" else 1
+        self.A = A
         self.load_data()
         if normalization:
             self.get_mean_map()
@@ -47,6 +48,8 @@ class Feeder(Dataset):
                 json_file = json.load(f)
             skeletons = json_file['skeletons']
             value = np.array(skeletons)
+            # if self.A is not None:
+                # value = np.array(self.A) @ value
             self.data.append(value)
 
     def get_mean_map(self):
