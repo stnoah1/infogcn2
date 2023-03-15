@@ -375,7 +375,7 @@ class Processor():
                     feature_loss = self.recon_loss(z_0, z_hat, mask_feature)
 
                     loss = self.arg.lambda_2 * recon_loss + self.arg.lambda_1 * cls_loss
-                    score_frag.append(y_hat.view(B,T,-1)[:,idx10,:].data.cpu().numpy())
+                    score_frag.append(y_hat.view(B,T,-1)[:,:,:].data.cpu().numpy())
                     loss_value.append(loss.data.item())
                     cls_loss_value.append(cls_loss.data.item())
 
