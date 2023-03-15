@@ -38,20 +38,3 @@ class LabelSmoothingCrossEntropy(nn.Module):
         loss = confidence * nll_loss + self.smoothing * smooth_loss
         return loss.mean()
 
-
-# class LabelSmoothingCrossEntropy(nn.Module):
-    # def __init__(self, smoothing=0.1, T=64):
-        # super(LabelSmoothingCrossEntropy, self).__init__()
-        # weight = torch.arange(T, 0, -1).cuda()
-        # weight = (weight/T*10).int()/200 + smoothing
-        # self.T = T
-        # self.smoothing = weight
-
-    # def forward(self, x, target):
-        # confidence = 1. - self.smoothing.unsqueeze(0).expand(target.size(0)//self.T, self.T).reshape(-1)
-        # logprobs = F.log_softmax(x, dim=-1)
-        # nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
-        # nll_loss = nll_loss.squeeze(1)
-        # smooth_loss = -logprobs.mean(dim=-1)
-        # loss = confidence * nll_loss + self.smoothing.unsqueeze(0).expand(target.size(0)//self.T, self.T).reshape(-1) * smooth_loss
-        # return loss.mean()
