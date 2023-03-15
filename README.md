@@ -2,16 +2,13 @@
 <img width="1166" alt="framework" src="https://user-images.githubusercontent.com/37060326/202824122-e98197b6-ebe4-4487-8f08-aa08738cb86c.png">
 
 ## Abstract
-Despite the impressive performance of recent algorithms on skeletal action recognition, these works are not applicable to applications that require real-time and online decision-making.
-The primary reason is that the recognition results are produced only after the whole observation of action.
-To overcome the limitation of current methods for skeleton-based action recognition, we address an online skeleton-based action recognition method, whose goal is to provide the action category while the action is being performed.
-In this work, we propose a new framework, Skeleton-ODE (SODE), which tackles online skeleton-based action recognition.
-We design SODE to provide the action category in real-time at any observation length with a single trained model.
-We guide SODE to predict the future motion from the observation to make it learn to represent the entire sequence from the previous observation.
-To enable SODE, we reformulate future prediction as an extrapolation of the observation.
-We adopt the concept of Neural Ordinary Differential Equation (ODE) to model the continuous flow of hidden states.
-Through extensive experiments, we demonstrate the advantages of SODE for online skeleton-based action recognition.
-SODE outperforms existing methods on three popular skeleton-based action benchmarks by a large margin in terms of AUC.
+Skeleton-based action recognition algorithms have achieved impressive results in recent years.
+However, they are unsuitable for applications requiring real-time and online decision-making. This limitation is problematic for scenarios where immediate action is necessary, such as surveillance or robotics. 
+To address this limitation, we propose a novel framework called SkeletonODE for online skeleton-based action recognition that provides real-time action category classification at any observation length.
+The SkeletonODE framework is designed to predict future motion from the observation and learns to represent the entire sequence from the previous observation.
+We accomplish this by reformulating future prediction as an extrapolation of the observation and adopting the concept of Neural Ordinary Differential Equation (ODE) to model the continuous flow of hidden states.
+Our experiments demonstrate the superiority of SkeletonODE for online skeleton-based action recognition, showing comparable or better performance compared to existing methods on three popular skeleton-based action benchmarks.
+These results indicate that SkeletonODE has significant potential for real-time and online action recognition applications.
 
 ## Dependencies
 
@@ -91,7 +88,7 @@ python main.py --half=True --batch_size=32 --test_batch_size=64 \
     --step 50 60 --num_epoch=70 --num_worker=4 --dataset=NW-UCLA --num_class=10 \
     --datacase=ucla --weight_decay=0.0005 --num_person=1 --num_point=20 --graph=graph.ucla.Graph \
     --feeder=feeders.feeder_ucla.Feeder --base_lr 1e-1 --base_channel 64 \
-    --window_size 52 --lambda_1=1e-0 --lambda_2=1.0 --lambda_3=1e+1 --n_step 3
+    --window_size 52 --lambda_1=1e-0 --lambda_2=1e-1 --lambda_3=1e-3 --n_step 3
 ```
 
 ### Testing
