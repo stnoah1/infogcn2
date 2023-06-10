@@ -1,4 +1,4 @@
-# Skeleton-ODE: Learning Representation by Predicting the Future for Online Skeleton-based Action Recognition
+# InfoGCN++: Learning Representation by Predicting the Future for Online Skeleton-based Action Recognition
 <img width="1166" alt="framework" src="https://user-images.githubusercontent.com/37060326/202824122-e98197b6-ebe4-4487-8f08-aa08738cb86c.png">
 
 ## Abstract
