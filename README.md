@@ -2,13 +2,10 @@
 <img width="1166" alt="framework" src="https://user-images.githubusercontent.com/37060326/202824122-e98197b6-ebe4-4487-8f08-aa08738cb86c.png">
 
 ## Abstract
-Skeleton-based action recognition algorithms have achieved impressive results in recent years.
-However, they are unsuitable for applications requiring real-time and online decision-making. This limitation is problematic for scenarios where immediate action is necessary, such as surveillance or robotics. 
-To address this limitation, we propose a novel framework called SkeletonODE for online skeleton-based action recognition that provides real-time action category classification at any observation length.
-The SkeletonODE framework is designed to predict future motion from the observation and learns to represent the entire sequence from the previous observation.
-We accomplish this by reformulating future prediction as an extrapolation of the observation and adopting the concept of Neural Ordinary Differential Equation (ODE) to model the continuous flow of hidden states.
-Our experiments demonstrate the superiority of SkeletonODE for online skeleton-based action recognition, showing comparable or better performance compared to existing methods on three popular skeleton-based action benchmarks.
-These results indicate that SkeletonODE has significant potential for real-time and online action recognition applications.
+While skeleton-based action recognition has made significant achievements in recent years, its application in real-time scenarios has been hindered by the necessity for complete action observation prior to classification. This is a critical shortcoming for scenarios that demand immediate action recognition, such as in surveillance systems and robotic applications. 
+In this work, we introduce InfoGCN++, an innovative framework designed specifically for online skeleton-based action recognition. It offers the advantage of providing real-time action category classification, irrespective of the length of observation. Unlike traditional methods, InfoGCN++ learns to predict future motion and construct a comprehensive representation of the entire sequence based on observed actions.
+We achieve this by predicting future prediction as an extrapolation problem based on observed actions and adopting the concept of Neural Ordinary Differential Equations (ODEs) to model the continuous evolution of hidden states.
+Our experiments on three widely used skeleton-based action benchmarks showcase the superiority of InfoGCN++ in online action recognition, with results either outperforming or on par with existing methods. This underscores InfoGCN++'s significant potential for transforming real-time and online action recognition applications. 
 
 ## Dependencies
 
