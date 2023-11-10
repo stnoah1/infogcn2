@@ -7,6 +7,15 @@ In this work, we introduce InfoGCN++, an innovative framework designed specifica
 We achieve this by predicting future prediction as an extrapolation problem based on observed actions and adopting the concept of Neural Ordinary Differential Equations (ODEs) to model the continuous evolution of hidden states.
 Our experiments on three widely used skeleton-based action benchmarks showcase the superiority of InfoGCN++ in online action recognition, with results either outperforming or on par with existing methods. This underscores InfoGCN++'s significant potential for transforming real-time and online action recognition applications. 
 
+```
+@article{chi2023infogcn++,
+  title={InfoGCN++: Learning Representation by Predicting the Future for Online Human Skeleton-based Action Recognition},
+  author={Chi, Seunggeun and Chi, Hyung-gun and Huang, Qixing and Ramani, Karthik},
+  journal={arXiv preprint arXiv:2310.10547},
+  year={2023}
+}
+```
+
 ## Dependencies
 
 - Python >= 3.8
@@ -104,5 +113,4 @@ python main.py --half=True --test_batch_size=64 --num_worker=4 --dataset=NW-UCLA
 This repo is based on [2s-AGCN](https://github.com/lshiwjx/2s-AGCN), [CTR-GCN](https://github.com/Uason-Chen/CTR-GCN), and [InfoGCN](https://github.com/stnoah1/infogcn).
 The data processing is borrowed from [SGN](https://github.com/microsoft/SGN), [HCN](https://github.com/huguyuehuhu/HCN-pytorch), and [Predict & Cluster](https://github.com/shlizee/Predict-Cluster).
 We use the Differentiable ODE Solvers for pytorch from [torchdiffeq](https://github.com/rtqichen/torchdiffeq).
-
 Thanks to the original authors for their work!
